@@ -66,12 +66,83 @@ final class WindowEngine {
         requestTrust()
     }
 
+    // MARK: - Animation (configurable; 0.4s default, 0 = instant)
+
+    static let animationDurationKey = "glass.animation.v1"
+
+    /// Duration in seconds for animated window moves (persisted in UserDefaults).
+    static var animationDuration: Double {
+        get { UserDefaults.standard.object(forKey: animationDurationKey) as? Double ?? 0.4 }
+        set {
+            let clamped = min(max(newValue, 0), 2)
+            UserDefaults.standard.set(clamped, forKey: animationDurationKey)
+        }
+    }
+
+    /// Sets the AX position + size immediately (used for discrete jumps and
+    /// the last frame of an animation).
+    func moveImmediate(_ window: AXUIElement, to cocoaFrame: CGRect) {
+        var origin = cocoaFrame.origin
+        var size = cocoaFrame.size
+        // dst is Cocoa (Y-up); AX expects Quartz global (Y-down). Flip about
+        // the main screen height — per-screen flipping mis-offsets tiles.
+        var quartzOrigin = origin
+        quartzOrigin.y = Self.mainScreenHeight() - quartzOrigin.y - size.height
+        if let o = AXValueCreate(.cgPoint, &quartzOrigin) {
+            AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, o)
+        }
+        if let s = AXValueCreate(.cgSize, &size) {
+            AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, s)
+        }
+    }
+
+    /// Animates the window from its current frame to `target` over
+    /// `Self.animationDuration` (ease-out). Callers must have snapshotted the
+    /// source frame before any move.
+    func moveAnimated(_ window: AXUIElement, from source: CGRect, to target: CGRect) {
+        let duration = Self.animationDuration
+        guard duration > 0, source != target else {
+            moveImmediate(window, to: target)
+            return
+        }
+        let start = Date().timeIntervalSinceReferenceDate
+        let timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { t in
+            let elapsed = Date().timeIntervalSinceReferenceDate - start
+            let x = min(max(elapsed / duration, 0), 1)
+            let ease = 1 - pow(1 - x, 3) // easeOutCubic
+            var p = CGPoint(
+                x: source.minX + (target.minX - source.minX) * ease,
+                y: source.minY + (target.minY - source.minY) * ease
+            )
+            var s = CGSize(
+                width: source.width + (target.width - source.width) * ease,
+                height: source.height + (target.height - source.height) * ease
+            )
+            // Interpolated p is Cocoa (Y-up); AX expects Quartz global (Y-down).
+            var quartzP = p
+            quartzP.y = Self.mainScreenHeight() - quartzP.y - s.height
+            if let ov = AXValueCreate(.cgPoint, &quartzP) {
+                AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, ov)
+            }
+            if let sv = AXValueCreate(.cgSize, &s) {
+                AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sv)
+            }
+            if x >= 1 {
+                t.invalidate()
+                // Snap to the exact target so the final frame is pixel-precise.
+                self.moveImmediate(window, to: target)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
     func perform(_ action: WindowAction) {
         // Do not gate on isTrusted(): AXIsProcessTrusted() is false for a stale
         // TCC row (old ad-hoc Glass) even when this .app is allowed. Prompting
         // on every hotkey is what the user saw. Try the move; prompt at most once
         // if AX cannot see a window.
         let trusted = Self.isTrusted()
+        Self.log("perform(\(action.rawValue)) animDur=\(String(format: "%.2f", Self.animationDuration))s trusted=\(trusted)")
         guard let window = frontWindow() else {
             Self.log("perform(\(action.rawValue)) no front window trusted=\(trusted)")
             Self.requestTrustIfNeeded()
@@ -83,7 +154,9 @@ final class WindowEngine {
 
         if action == .restore {
             if let saved = lastCocoaFrame {
-                setCocoaFrame(window, saved)
+                if let current = cocoaFrame(of: window) {
+                    moveAnimated(window, from: current, to: saved)
+                }
             }
             return
         }
@@ -94,7 +167,14 @@ final class WindowEngine {
         }
         lastCocoaFrame = current
         guard let screen = screen(for: current) else { return }
-        setCocoaFrame(window, targetRect(for: action, current: current, screen: screen))
+        moveAnimated(window, from: current, to: targetRect(for: action, current: current, screen: screen))
+    }
+
+    /// Height of the main (origin .zero) screen — the pivot for converting
+    /// between Cocoa (Y-up) and Quartz global (Y-down) coordinates.
+    private static func mainScreenHeight() -> CGFloat {
+        NSScreen.screens.first { $0.frame.origin == .zero }?.frame.height
+            ?? (NSScreen.main?.frame.height ?? 0)
     }
 
     // MARK: - Front window
