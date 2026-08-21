@@ -73,6 +73,36 @@ if runCLI() {
     exit(0)
 }
 
+/// Debug bridge: lets an untrusted shell (e2e, developer) ask the trusted,
+/// running Glass to execute a geometry round-trip on the front window.
+/// Trigger:  printf topLeft > /tmp/glass-roundtrip.action
+///           notifyutil -p glass.debug.roundtrip
+/// Report:   /tmp/glass-roundtrip.log
+enum RoundTripDebug {
+    static let notifyName = "glass.debug.roundtrip" as CFString
+    static let actionFile = "/tmp/glass-roundtrip.action"
+    static let reportFile = "/tmp/glass-roundtrip.log"
+
+    static func install() {
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            nil,
+            { _, _, _, _, _ in DispatchQueue.main.async { RoundTripDebug.run() } },
+            notifyName,
+            nil,
+            .deliverImmediately
+        )
+    }
+
+    static func run() {
+        let requested = (try? String(contentsOfFile: actionFile, encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let action = WindowAction(rawValue: requested) ?? .topHalf
+        let report = WindowEngine.shared.debugRoundTrip(action: action) ?? "no-front-window"
+        try? report.write(toFile: reportFile, atomically: true, encoding: .utf8)
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
 
@@ -89,6 +119,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         HotKeyManager.shared.install { action in
             WindowEngine.shared.perform(action)
         }
+
+        RoundTripDebug.install()
 
         NotificationCenter.default.addObserver(
             self,
