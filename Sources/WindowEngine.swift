@@ -177,67 +177,47 @@ final class WindowEngine {
         moveAnimated(window, from: current, to: target)
         // Safety net: if the app still clamped late, re-pin (no-op normally).
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.animationDuration + 0.1) { [weak self] in
-            self?.rePinClamped(window, target: target, action: resolved)
-            if let after = self?.cocoaFrame(of: window) {
+            guard let self else { return }
+            self.settleAndRepin(window, target: target, action: resolved)
+            if let after = self.cocoaFrame(of: window) {
                 Self.log("perform(\(action.rawValue)) finalRead=\(after) delta=\(CGSize(width: after.minX - target.minX, height: after.minY - target.minY))")
             }
         }
     }
 
-    /// Directional/cycling resolution shared by hotkeys and the debug bridge.
+    /// Directional resolution shared by hotkeys and the debug bridge.
     /// - Shifted arrows slide RELATIVELY on the 2x2 quarter grid: ←/→ one
-    ///   column, ↑/↓ one row, wrapping, from the window's current quadrant.
-    /// - Halves/thirds/two-thirds apply absolutely, EXCEPT when the window
-    ///   already occupies the requested tile — then it advances to the next
-    ///   slot in the same family (wrapping): ⌘⌥+← in the left half slides to
-    ///   the right half; ⌘⌥+2 in the center third slides to the right third.
+    ///   column, ↑/↓ one row — CLAMPED to the screen, so pressing further
+    ///   past an edge is a no-op (no wrapping).
+    /// - All other tiles are ordered along their axis (halves, thirds,
+    ///   two-thirds): picking a tile always moves toward it, can never leave
+    ///   the screen, and re-picking the tile you're in is a no-op.
     func resolvedAction(for action: WindowAction, current: CGRect, visible: CGRect) -> WindowAction {
+        guard isCorner(action) else { return action }
+        let (dCol, dRow): (Int, Int)
         switch action {
-        case .topLeft, .topRight, .bottomLeft, .bottomRight:
-            let (dCol, dRow): (Int, Int)
-            switch action {
-            case .topLeft: (dCol, dRow) = (-1, 0)    // ←
-            case .topRight: (dCol, dRow) = (1, 0)    // →
-            case .bottomLeft: (dCol, dRow) = (0, -1) // ↓
-            default: (dCol, dRow) = (0, 1)           // ↑
-            }
-            let col = current.midX <= visible.midX ? 0 : 1
-            let row = current.midY <= visible.midY ? 0 : 1 // cocoa Y-up: 0 = bottom
-            let nextCol = ((col + dCol) % 2 + 2) % 2
-            let nextRow = ((row + dRow) % 2 + 2) % 2
-            switch (nextCol, nextRow) {
-            case (0, 1): return .topLeft
-            case (1, 1): return .topRight
-            case (0, 0): return .bottomLeft
-            default: return .bottomRight
-            }
-        case .leftHalf, .rightHalf:
-            return cycled(action, family: [.leftHalf, .rightHalf], current: current, visible: visible)
-        case .topHalf, .bottomHalf:
-            return cycled(action, family: [.topHalf, .bottomHalf], current: current, visible: visible)
-        case .leftThird, .centerThird, .rightThird:
-            return cycled(action, family: [.leftThird, .centerThird, .rightThird], current: current, visible: visible)
-        case .leftTwoThirds, .rightTwoThirds:
-            return cycled(action, family: [.leftTwoThirds, .rightTwoThirds], current: current, visible: visible)
-        default:
-            return action
+        case .topLeft: (dCol, dRow) = (-1, 0)    // ←
+        case .topRight: (dCol, dRow) = (1, 0)    // →
+        case .bottomLeft: (dCol, dRow) = (0, -1) // ↓
+        default: (dCol, dRow) = (0, 1)           // ↑
+        }
+        let col = current.midX <= visible.midX ? 0 : 1
+        let row = current.midY <= visible.midY ? 0 : 1 // cocoa Y-up: 0 = bottom
+        let nextCol = min(max(col + dCol, 0), 1)
+        let nextRow = min(max(row + dRow, 0), 1)
+        switch (nextCol, nextRow) {
+        case (0, 1): return .topLeft
+        case (1, 1): return .topRight
+        case (0, 0): return .bottomLeft
+        default: return .bottomRight
         }
     }
 
-    /// If the window already sits in `action`'s tile, return the next family
-    /// slot (wrapping); otherwise honor the request as-is.
-    private func cycled(_ action: WindowAction, family: [WindowAction], current: CGRect, visible: CGRect) -> WindowAction {
-        guard let idx = family.firstIndex(of: action) else { return action }
-        let tile = layoutRect(for: action, current: current, visible: visible)
-        if occupiesTile(current, tile: tile) {
-            return family[(idx + 1) % family.count]
+    private func isCorner(_ action: WindowAction) -> Bool {
+        switch action {
+        case .topLeft, .topRight, .bottomLeft, .bottomRight: return true
+        default: return false
         }
-        return action
-    }
-
-    private func occupiesTile(_ r: CGRect, tile: CGRect) -> Bool {
-        abs(r.midX - tile.midX) < 60 && abs(r.midY - tile.midY) < 60 &&
-        abs(r.width - tile.width) < 120 && abs(r.height - tile.height) < 120
     }
 
     /// Height of the main display — THE single pivot for converting between
@@ -339,6 +319,19 @@ final class WindowEngine {
         moveImmediate(window, to: fixed)
     }
 
+    /// Waits for the app's frame to stop changing (min-size clamps can land
+    /// late), then re-pins if the app returned more size than requested.
+    func settleAndRepin(_ window: AXUIElement, target: CGRect, action: WindowAction) {
+        var last = cocoaFrame(of: window)
+        for _ in 0..<5 {
+            Thread.sleep(forTimeInterval: 0.1)
+            let now = cocoaFrame(of: window)
+            if now == last { break }
+            last = now
+        }
+        rePinClamped(window, target: target, action: action)
+    }
+
     private func screen(for cocoaRect: CGRect) -> NSScreen? {
         let center = CGPoint(x: cocoaRect.midX, y: cocoaRect.midY)
         return NSScreen.screens.first { $0.frame.contains(center) } ?? NSScreen.main
@@ -380,9 +373,7 @@ final class WindowEngine {
         let expectedQuartz = Self.quartzOrigin(ofCocoa: target)
 
         moveImmediate(window, to: target)
-        Thread.sleep(forTimeInterval: 0.2)
-        rePinClamped(window, target: target, action: action)
-        Thread.sleep(forTimeInterval: 0.2)
+        settleAndRepin(window, target: target, action: resolved)
         let after = rawQuartzFrame(of: window) ?? before
         let afterCocoa = Self.cocoaRect(quartzOrigin: after.origin, size: after.size)
         let screens = NSScreen.screens
