@@ -147,31 +147,64 @@ final class WindowEngine {
             Self.log("perform(\(action.rawValue)) AX check false; trying anyway")
         }
 
-        if action == .restore {
-            if let saved = lastCocoaFrame {
-                if let current = cocoaFrame(of: window) {
-                    moveAnimated(window, from: current, to: saved)
-                }
-            }
-            return
-        }
-
         guard let current = cocoaFrame(of: window) else {
             Self.requestTrustIfNeeded()
             return
         }
-        lastCocoaFrame = current
+        if action == .restore {
+            if let saved = lastCocoaFrame {
+                moveAnimated(window, from: current, to: saved)
+            }
+            return
+        }
         guard let screen = screen(for: current) else { return }
-        let target = targetRect(for: action, current: current, screen: screen)
-        Self.log("perform(\(action.rawValue)) current=\(current) screen='\(screen.localizedName)' visible=\(screen.visibleFrame) mainH=\(Self.mainScreenHeight()) target=\(target)")
+        let resolved = resolvedCornerAction(action, current: current, visible: screen.visibleFrame)
+        var target = targetRect(for: resolved, current: current, screen: screen)
+
+        // Probe the size the app will actually accept (many enforce a minimum
+        // window size) BEFORE animating, and pin the animation target to the
+        // achievable on-screen rect. Otherwise the window glides past the
+        // screen edge mid-animation and snaps back once the clamp is found.
+        moveImmediate(window, to: CGRect(origin: current.origin, size: target.size))
+        if let probed = cocoaFrame(of: window),
+           abs(probed.size.width - target.width) > 0.5 || abs(probed.size.height - target.height) > 0.5 {
+            Self.log("perform(\(action.rawValue)) probe clamp \(target.size) -> \(probed.size)")
+            target = Self.pinnedRect(target: target, actualSize: probed.size, action: resolved)
+        }
+
+        lastCocoaFrame = current
+        Self.log("perform(\(action.rawValue)) resolved=\(resolved.rawValue) current=\(current) screen='\(screen.localizedName)' visible=\(screen.visibleFrame) mainH=\(Self.mainScreenHeight()) target=\(target)")
         moveAnimated(window, from: current, to: target)
-        // After the animation settles, undo any app-side min-size clamp by
-        // re-pinning the (possibly oversized) window to the tile's corner.
+        // Safety net: if the app still clamped late, re-pin (no-op normally).
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.animationDuration + 0.1) { [weak self] in
-            self?.rePinClamped(window, target: target, action: action)
+            self?.rePinClamped(window, target: target, action: resolved)
             if let after = self?.cocoaFrame(of: window) {
                 Self.log("perform(\(action.rawValue)) finalRead=\(after) delta=\(CGSize(width: after.minX - target.minX, height: after.minY - target.minY))")
             }
+        }
+    }
+
+    /// The four shifted-arrow actions are RELATIVE moves on the 2x2 quarter
+    /// grid: ←/→ slide one column, ↑/↓ slide one row (wrapping), based on the
+    /// window's current quadrant. E.g. from bottom-left, → goes bottom-right.
+    func resolvedCornerAction(_ action: WindowAction, current: CGRect, visible: CGRect) -> WindowAction {
+        let (dCol, dRow): (Int, Int)
+        switch action {
+        case .topLeft: (dCol, dRow) = (-1, 0)    // ←
+        case .topRight: (dCol, dRow) = (1, 0)    // →
+        case .bottomLeft: (dCol, dRow) = (0, -1) // ↓
+        case .bottomRight: (dCol, dRow) = (0, 1) // ↑
+        default: return action
+        }
+        let col = current.midX <= visible.midX ? 0 : 1
+        let row = current.midY <= visible.midY ? 0 : 1 // cocoa Y-up: 0 = bottom
+        let nextCol = ((col + dCol) % 2 + 2) % 2
+        let nextRow = ((row + dRow) % 2 + 2) % 2
+        switch (nextCol, nextRow) {
+        case (0, 1): return .topLeft
+        case (1, 1): return .topRight
+        case (0, 0): return .bottomLeft
+        default: return .bottomRight
         }
     }
 
@@ -237,52 +270,41 @@ final class WindowEngine {
 
     // MARK: - Min-size clamp handling
 
+    /// Rect with the app's actual (possibly min-size-clamped) size, anchored
+    /// to the tile's intended corner/edges so it never hangs off-screen.
+    static func pinnedRect(target: CGRect, actualSize: CGSize, action: WindowAction) -> CGRect {
+        var origin = target.origin
+        switch action {
+        case .rightHalf, .topRight, .bottomRight, .rightThird, .rightTwoThirds:
+            origin.x = target.maxX - actualSize.width
+        case .centerThird, .maximize, .almostMaximize, .center:
+            origin.x = target.midX - actualSize.width / 2
+        default: break // left-anchored or full-width
+        }
+        switch action {
+        case .topHalf, .topLeft, .topRight, .leftThird, .centerThird,
+             .rightThird, .leftTwoThirds, .rightTwoThirds:
+            origin.y = target.maxY - actualSize.height
+        case .bottomHalf, .bottomLeft, .bottomRight:
+            origin.y = target.minY
+        default: break // vertical center already applied above for center/maximize
+        }
+        return CGRect(origin: origin, size: actualSize)
+    }
+
     /// Some apps (Chrome, Electron, …) refuse AX resizes below their own
     /// minimum window size. The preceding position write still succeeds, so
     /// the window ends up anchored at the tile origin but OVERFLOWS the tile —
     /// for bottom/right anchors it hangs off-screen entirely. Re-pin it to the
     /// tile's intended corner/edges so a clamped window stays where it belongs.
     func rePinClamped(_ window: AXUIElement, target: CGRect, action: WindowAction) {
-        guard var actual = cocoaFrame(of: window) else { return }
+        guard let actual = cocoaFrame(of: window) else { return }
         let dw = actual.width - target.width
         let dh = actual.height - target.height
         guard dw > 0.5 || dh > 0.5 else { return }
-
-        enum Pin { case left, right, center, top, bottom, skip }
-        let pinX: Pin
-        let pinY: Pin
-        switch action {
-        case .leftHalf: pinX = .left; pinY = .top
-        case .rightHalf: pinX = .right; pinY = .top
-        case .topHalf: pinX = .left; pinY = .top
-        case .bottomHalf: pinX = .left; pinY = .bottom
-        case .topLeft: pinX = .left; pinY = .top
-        case .topRight: pinX = .right; pinY = .top
-        case .bottomLeft: pinX = .left; pinY = .bottom
-        case .bottomRight: pinX = .right; pinY = .bottom
-        case .leftThird: pinX = .left; pinY = .top
-        case .centerThird: pinX = .center; pinY = .top
-        case .rightThird: pinX = .right; pinY = .top
-        case .leftTwoThirds: pinX = .left; pinY = .top
-        case .rightTwoThirds: pinX = .right; pinY = .top
-        case .maximize, .almostMaximize, .center: pinX = .center; pinY = .center
-        case .restore, .nextDisplay, .previousDisplay: return
-        }
-
-        switch pinX {
-        case .left: actual.origin.x = target.minX
-        case .right: actual.origin.x = target.maxX - actual.width
-        case .center: actual.origin.x = target.midX - actual.width / 2
-        default: break
-        }
-        switch pinY {
-        case .top: actual.origin.y = target.maxY - actual.height
-        case .bottom: actual.origin.y = target.minY
-        case .center: actual.origin.y = target.midY - actual.height / 2
-        default: break
-        }
-        Self.log("appMinSizeClamp \(action.rawValue): requested=\(target.size) got=\(CGSize(width: actual.width, height: actual.height)) -> repin origin \(actual.origin)")
-        moveImmediate(window, to: actual)
+        let fixed = Self.pinnedRect(target: target, actualSize: actual.size, action: action)
+        Self.log("appMinSizeClamp \(action.rawValue): requested=\(target.size) got=\(actual.size) -> repin origin \(fixed.origin)")
+        moveImmediate(window, to: fixed)
     }
 
     private func screen(for cocoaRect: CGRect) -> NSScreen? {
@@ -320,7 +342,9 @@ final class WindowEngine {
         let appName = NSWorkspace.shared.frontmostApplication?.localizedName ?? "?"
         let beforeCocoa = Self.cocoaRect(quartzOrigin: before.origin, size: before.size)
         guard let screen = screen(for: beforeCocoa) else { return nil }
-        let target = layoutRect(for: action, current: beforeCocoa, visible: screen.visibleFrame, screen: screen)
+        // Same relative-corner resolution the hotkey path uses.
+        let resolved = resolvedCornerAction(action, current: beforeCocoa, visible: screen.visibleFrame)
+        let target = layoutRect(for: resolved, current: beforeCocoa, visible: screen.visibleFrame, screen: screen)
         let expectedQuartz = Self.quartzOrigin(ofCocoa: target)
 
         moveImmediate(window, to: target)
@@ -334,7 +358,7 @@ final class WindowEngine {
             .joined(separator: " | ")
 
         return """
-        roundtrip action=\(action.rawValue) app=\(appName)
+        roundtrip action=\(action.rawValue) resolved=\(resolved.rawValue) app=\(appName)
           mainScreenHeight=\(Self.mainScreenHeight())
           screens=\(screens)
           before  quartz=\(before.origin) size=\(before.size) -> cocoa=\(beforeCocoa)
