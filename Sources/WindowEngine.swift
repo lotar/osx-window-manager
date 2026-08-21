@@ -158,7 +158,7 @@ final class WindowEngine {
             return
         }
         guard let screen = screen(for: current) else { return }
-        let resolved = resolvedCornerAction(action, current: current, visible: screen.visibleFrame)
+        let resolved = resolvedAction(for: action, current: current, visible: screen.visibleFrame)
         var target = targetRect(for: resolved, current: current, screen: screen)
 
         // Probe the size the app will actually accept (many enforce a minimum
@@ -184,28 +184,60 @@ final class WindowEngine {
         }
     }
 
-    /// The four shifted-arrow actions are RELATIVE moves on the 2x2 quarter
-    /// grid: ←/→ slide one column, ↑/↓ slide one row (wrapping), based on the
-    /// window's current quadrant. E.g. from bottom-left, → goes bottom-right.
-    func resolvedCornerAction(_ action: WindowAction, current: CGRect, visible: CGRect) -> WindowAction {
-        let (dCol, dRow): (Int, Int)
+    /// Directional/cycling resolution shared by hotkeys and the debug bridge.
+    /// - Shifted arrows slide RELATIVELY on the 2x2 quarter grid: ←/→ one
+    ///   column, ↑/↓ one row, wrapping, from the window's current quadrant.
+    /// - Halves/thirds/two-thirds apply absolutely, EXCEPT when the window
+    ///   already occupies the requested tile — then it advances to the next
+    ///   slot in the same family (wrapping): ⌘⌥+← in the left half slides to
+    ///   the right half; ⌘⌥+2 in the center third slides to the right third.
+    func resolvedAction(for action: WindowAction, current: CGRect, visible: CGRect) -> WindowAction {
         switch action {
-        case .topLeft: (dCol, dRow) = (-1, 0)    // ←
-        case .topRight: (dCol, dRow) = (1, 0)    // →
-        case .bottomLeft: (dCol, dRow) = (0, -1) // ↓
-        case .bottomRight: (dCol, dRow) = (0, 1) // ↑
-        default: return action
+        case .topLeft, .topRight, .bottomLeft, .bottomRight:
+            let (dCol, dRow): (Int, Int)
+            switch action {
+            case .topLeft: (dCol, dRow) = (-1, 0)    // ←
+            case .topRight: (dCol, dRow) = (1, 0)    // →
+            case .bottomLeft: (dCol, dRow) = (0, -1) // ↓
+            default: (dCol, dRow) = (0, 1)           // ↑
+            }
+            let col = current.midX <= visible.midX ? 0 : 1
+            let row = current.midY <= visible.midY ? 0 : 1 // cocoa Y-up: 0 = bottom
+            let nextCol = ((col + dCol) % 2 + 2) % 2
+            let nextRow = ((row + dRow) % 2 + 2) % 2
+            switch (nextCol, nextRow) {
+            case (0, 1): return .topLeft
+            case (1, 1): return .topRight
+            case (0, 0): return .bottomLeft
+            default: return .bottomRight
+            }
+        case .leftHalf, .rightHalf:
+            return cycled(action, family: [.leftHalf, .rightHalf], current: current, visible: visible)
+        case .topHalf, .bottomHalf:
+            return cycled(action, family: [.topHalf, .bottomHalf], current: current, visible: visible)
+        case .leftThird, .centerThird, .rightThird:
+            return cycled(action, family: [.leftThird, .centerThird, .rightThird], current: current, visible: visible)
+        case .leftTwoThirds, .rightTwoThirds:
+            return cycled(action, family: [.leftTwoThirds, .rightTwoThirds], current: current, visible: visible)
+        default:
+            return action
         }
-        let col = current.midX <= visible.midX ? 0 : 1
-        let row = current.midY <= visible.midY ? 0 : 1 // cocoa Y-up: 0 = bottom
-        let nextCol = ((col + dCol) % 2 + 2) % 2
-        let nextRow = ((row + dRow) % 2 + 2) % 2
-        switch (nextCol, nextRow) {
-        case (0, 1): return .topLeft
-        case (1, 1): return .topRight
-        case (0, 0): return .bottomLeft
-        default: return .bottomRight
+    }
+
+    /// If the window already sits in `action`'s tile, return the next family
+    /// slot (wrapping); otherwise honor the request as-is.
+    private func cycled(_ action: WindowAction, family: [WindowAction], current: CGRect, visible: CGRect) -> WindowAction {
+        guard let idx = family.firstIndex(of: action) else { return action }
+        let tile = layoutRect(for: action, current: current, visible: visible)
+        if occupiesTile(current, tile: tile) {
+            return family[(idx + 1) % family.count]
         }
+        return action
+    }
+
+    private func occupiesTile(_ r: CGRect, tile: CGRect) -> Bool {
+        abs(r.midX - tile.midX) < 60 && abs(r.midY - tile.midY) < 60 &&
+        abs(r.width - tile.width) < 120 && abs(r.height - tile.height) < 120
     }
 
     /// Height of the main display — THE single pivot for converting between
@@ -342,8 +374,8 @@ final class WindowEngine {
         let appName = NSWorkspace.shared.frontmostApplication?.localizedName ?? "?"
         let beforeCocoa = Self.cocoaRect(quartzOrigin: before.origin, size: before.size)
         guard let screen = screen(for: beforeCocoa) else { return nil }
-        // Same relative-corner resolution the hotkey path uses.
-        let resolved = resolvedCornerAction(action, current: beforeCocoa, visible: screen.visibleFrame)
+        // Same relative/cycling resolution the hotkey path uses.
+        let resolved = resolvedAction(for: action, current: beforeCocoa, visible: screen.visibleFrame)
         let target = layoutRect(for: resolved, current: beforeCocoa, visible: screen.visibleFrame, screen: screen)
         let expectedQuartz = Self.quartzOrigin(ofCocoa: target)
 
