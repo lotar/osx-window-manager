@@ -39,6 +39,27 @@ private func runCLI() -> Bool {
         Thread.sleep(forTimeInterval: 0.35)
         return true
     }
+    if let i = args.firstIndex(of: "--roundtrip") {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.prohibited)
+        if !WindowEngine.isTrusted() {
+            fputs("not-trusted\n", stderr)
+            exit(3)
+        }
+        // Optional action argument; default topHalf (exercises the Y flip).
+        let actionName = i + 1 < args.count && !args[i + 1].hasPrefix("--") ? args[i + 1] : "topHalf"
+        guard let action = WindowAction(rawValue: actionName) else {
+            fputs("unknown action \(actionName)\n", stderr)
+            exit(2)
+        }
+        if let report = WindowEngine.shared.debugRoundTrip(action: action) {
+            print(report)
+        } else {
+            fputs("no-front-window\n", stderr)
+            exit(4)
+        }
+        return true
+    }
     if args.contains("--trusted") {
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)

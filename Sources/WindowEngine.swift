@@ -82,13 +82,9 @@ final class WindowEngine {
     /// Sets the AX position + size immediately (used for discrete jumps and
     /// the last frame of an animation).
     func moveImmediate(_ window: AXUIElement, to cocoaFrame: CGRect) {
-        var origin = cocoaFrame.origin
+        var origin = Self.quartzOrigin(ofCocoa: cocoaFrame) // Cocoa → Quartz global
         var size = cocoaFrame.size
-        // dst is Cocoa (Y-up); AX expects Quartz global (Y-down). Flip about
-        // the main screen height — per-screen flipping mis-offsets tiles.
-        var quartzOrigin = origin
-        quartzOrigin.y = Self.mainScreenHeight() - quartzOrigin.y - size.height
-        if let o = AXValueCreate(.cgPoint, &quartzOrigin) {
+        if let o = AXValueCreate(.cgPoint, &origin) {
             AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, o)
         }
         if let s = AXValueCreate(.cgSize, &size) {
@@ -118,10 +114,9 @@ final class WindowEngine {
                 width: source.width + (target.width - source.width) * ease,
                 height: source.height + (target.height - source.height) * ease
             )
-            // Interpolated p is Cocoa (Y-up); AX expects Quartz global (Y-down).
-            var quartzP = p
-            quartzP.y = Self.mainScreenHeight() - quartzP.y - s.height
-            if let ov = AXValueCreate(.cgPoint, &quartzP) {
+            // Interpolated p is Cocoa; convert with the shared helper.
+            var origin = Self.quartzOrigin(ofCocoa: CGRect(origin: p, size: s))
+            if let ov = AXValueCreate(.cgPoint, &origin) {
                 AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, ov)
             }
             if let sv = AXValueCreate(.cgSize, &s) {
@@ -167,14 +162,39 @@ final class WindowEngine {
         }
         lastCocoaFrame = current
         guard let screen = screen(for: current) else { return }
-        moveAnimated(window, from: current, to: targetRect(for: action, current: current, screen: screen))
+        let target = targetRect(for: action, current: current, screen: screen)
+        Self.log("perform(\(action.rawValue)) current=\(current) screen='\(screen.localizedName)' visible=\(screen.visibleFrame) mainH=\(Self.mainScreenHeight()) target=\(target)")
+        moveAnimated(window, from: current, to: target)
+        if let after = cocoaFrame(of: window) {
+            Self.log("perform(\(action.rawValue)) postMoveRead=\(after) delta=\(CGSize(width: after.minX - target.minX, height: after.minY - target.minY))")
+        }
     }
 
-    /// Height of the main (origin .zero) screen — the pivot for converting
-    /// between Cocoa (Y-up) and Quartz global (Y-down) coordinates.
-    private static func mainScreenHeight() -> CGFloat {
-        NSScreen.screens.first { $0.frame.origin == .zero }?.frame.height
-            ?? (NSScreen.main?.frame.height ?? 0)
+    /// Height of the main display — THE single pivot for converting between
+    /// Cocoa global (origin = bottom-left of main display, Y-up) and Quartz
+    /// global (origin = top-left of main display, Y-down). Every conversion in
+    /// this file must go through these two functions; per-screen or
+    /// max-of-screens pivots are wrong on any non-trivial arrangement.
+    static func mainScreenHeight() -> CGFloat {
+        if let s = NSScreen.screens.first(where: { $0.frame.origin == .zero }) {
+            return s.frame.height
+        }
+        return CGFloat(CGDisplayBounds(CGMainDisplayID()).height)
+    }
+
+    /// Cocoa rect → Quartz-global top-left origin (the AX write format).
+    static func quartzOrigin(ofCocoa rect: CGRect) -> CGPoint {
+        CGPoint(x: rect.minX, y: mainScreenHeight() - rect.maxY)
+    }
+
+    /// Quartz-global top-left origin + size → Cocoa rect (the AX read format).
+    static func cocoaRect(quartzOrigin origin: CGPoint, size: CGSize) -> CGRect {
+        CGRect(
+            x: origin.x,
+            y: mainScreenHeight() - origin.y - size.height,
+            width: size.width,
+            height: size.height
+        )
     }
 
     // MARK: - Front window
@@ -193,24 +213,6 @@ final class WindowEngine {
 
     // MARK: - Cocoa ↔ AX
 
-    /// Top of the global desktop in AppKit coordinates.
-    private var desktopHeight: CGFloat {
-        NSScreen.screens.map(\.frame.maxY).max() ?? 0
-    }
-
-    private func axOrigin(forCocoa rect: CGRect) -> CGPoint {
-        CGPoint(x: rect.minX, y: desktopHeight - rect.maxY)
-    }
-
-    private func cocoaRect(axOrigin origin: CGPoint, size: CGSize) -> CGRect {
-        CGRect(
-            x: origin.x,
-            y: desktopHeight - origin.y - size.height,
-            width: size.width,
-            height: size.height
-        )
-    }
-
     private func cocoaFrame(of window: AXUIElement) -> CGRect? {
         var positionValue: AnyObject?
         var sizeValue: AnyObject?
@@ -225,29 +227,63 @@ final class WindowEngine {
             AXValueGetValue(positionValue as! AXValue, .cgPoint, &origin),
             AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
         else { return nil }
-        return cocoaRect(axOrigin: origin, size: size)
-    }
-
-    /// Size → position → size. Electron (and some other apps) ignore a lone
-    /// position write if the size does not yet fit the destination.
-    private func setCocoaFrame(_ window: AXUIElement, _ rect: CGRect) {
-        var origin = axOrigin(forCocoa: rect)
-        var size = rect.size
-        guard
-            let positionValue = AXValueCreate(.cgPoint, &origin),
-            let sizeValue = AXValueCreate(.cgSize, &size)
-        else { return }
-        let s1 = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sizeValue)
-        let p1 = AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, positionValue)
-        let s2 = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sizeValue)
-        if s1 != .success && p1 != .success && s2 != .success {
-            Self.requestTrustIfNeeded()
-        }
+        return Self.cocoaRect(quartzOrigin: origin, size: size)
     }
 
     private func screen(for cocoaRect: CGRect) -> NSScreen? {
         let center = CGPoint(x: cocoaRect.midX, y: cocoaRect.midY)
         return NSScreen.screens.first { $0.frame.contains(center) } ?? NSScreen.main
+    }
+
+    // MARK: - Debug round trip (--roundtrip CLI)
+
+    /// Reads the raw Quartz AX frame of `window` (no conversion).
+    func rawQuartzFrame(of window: AXUIElement) -> (origin: CGPoint, size: CGSize)? {
+        var positionValue: AnyObject?
+        var sizeValue: AnyObject?
+        guard
+            AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &positionValue) == .success,
+            AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &sizeValue) == .success,
+            let positionValue, let sizeValue
+        else { return nil }
+        var origin = CGPoint.zero
+        var size = CGSize.zero
+        guard
+            AXValueGetValue(positionValue as! AXValue, .cgPoint, &origin),
+            AXValueGetValue(sizeValue as! AXValue, .cgSize, &size)
+        else { return nil }
+        return (origin, size)
+    }
+
+    /// Live validation of the Cocoa↔Quartz conversion against the frontmost
+    /// window: read AX → convert to Cocoa → pick tile → convert back → write →
+    /// re-read → report deltas. Prints a machine-checkable report so geometry
+    /// can be verified without interactive hotkeys. Returns nil if no window.
+    @discardableResult
+    func debugRoundTrip(action: WindowAction) -> String? {
+        guard let window = frontWindow(), let before = rawQuartzFrame(of: window) else { return nil }
+        let beforeCocoa = Self.cocoaRect(quartzOrigin: before.origin, size: before.size)
+        guard let screen = screen(for: beforeCocoa) else { return nil }
+        let target = layoutRect(for: action, current: beforeCocoa, visible: screen.visibleFrame, screen: screen)
+        let expectedQuartz = Self.quartzOrigin(ofCocoa: target)
+
+        moveImmediate(window, to: target)
+        Thread.sleep(forTimeInterval: 0.15)
+        let after = rawQuartzFrame(of: window) ?? before
+        let afterCocoa = Self.cocoaRect(quartzOrigin: after.origin, size: after.size)
+        let screens = NSScreen.screens
+            .map { "\($0.localizedName) frame=\($0.frame) visible=\($0.visibleFrame)" }
+            .joined(separator: " | ")
+
+        return """
+        roundtrip action=\(action.rawValue)
+          mainScreenHeight=\(Self.mainScreenHeight())
+          screens=\(screens)
+          before  quartz=\(before.origin) size=\(before.size) -> cocoa=\(beforeCocoa)
+          target  cocoa=\(target) -> expectedQuartz=\(expectedQuartz)
+          after   quartz=\(after.origin) size=\(after.size) -> cocoa=\(afterCocoa)
+          delta   quartz=(\(after.origin.x - expectedQuartz.x), \(after.origin.y - expectedQuartz.y)) size=(\(after.size.width - target.width), \(after.size.height - target.height))
+        """
     }
 
     // MARK: - Layout
@@ -261,6 +297,8 @@ final class WindowEngine {
         let halfW = w / 2
         let halfH = h / 2
         let col = w / 3
+        let q = w / 4
+        let qh = h / 4
 
         switch action {
         case .leftHalf:
@@ -271,14 +309,16 @@ final class WindowEngine {
             return CGRect(x: area.minX, y: area.minY + halfH, width: w, height: h - halfH)
         case .bottomHalf:
             return CGRect(x: area.minX, y: area.minY, width: w, height: halfH)
+        // Corner tiles: exactly 1/4 of the visible width x height (was half x
+        // half, which read as oversized). Each arrow picks its corner.
         case .topLeft:
-            return CGRect(x: area.minX, y: area.minY + halfH, width: halfW, height: h - halfH)
+            return CGRect(x: area.minX, y: area.minY + h - qh, width: q, height: qh)
         case .topRight:
-            return CGRect(x: area.minX + halfW, y: area.minY + halfH, width: w - halfW, height: h - halfH)
+            return CGRect(x: area.minX + w - q, y: area.minY + h - qh, width: q, height: qh)
         case .bottomLeft:
-            return CGRect(x: area.minX, y: area.minY, width: halfW, height: halfH)
+            return CGRect(x: area.minX, y: area.minY, width: q, height: qh)
         case .bottomRight:
-            return CGRect(x: area.minX + halfW, y: area.minY, width: w - halfW, height: halfH)
+            return CGRect(x: area.minX + w - q, y: area.minY, width: q, height: qh)
         case .leftThird:
             return CGRect(x: area.minX, y: area.minY, width: col, height: h)
         case .centerThird:
