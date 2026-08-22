@@ -455,8 +455,6 @@ final class WindowEngine {
         let halfW = w / 2
         let halfH = h / 2
         let col = w / 3
-        let q = w / 4
-        let qh = h / 4
 
         switch action {
         case .leftHalf:
@@ -467,16 +465,16 @@ final class WindowEngine {
             return CGRect(x: area.minX, y: area.minY + halfH, width: w, height: h - halfH)
         case .bottomHalf:
             return CGRect(x: area.minX, y: area.minY, width: w, height: halfH)
-        // Corner tiles: exactly 1/4 of the visible width x height (was half x
-        // half, which read as oversized). Each arrow picks its corner.
+        // Corner tiles: half width x half height (screen quadrants), so four
+        // windows tile the screen 2x2 edge-to-edge. Arrows slide between them.
         case .topLeft:
-            return CGRect(x: area.minX, y: area.minY + h - qh, width: q, height: qh)
+            return CGRect(x: area.minX, y: area.minY + halfH, width: halfW, height: h - halfH)
         case .topRight:
-            return CGRect(x: area.minX + w - q, y: area.minY + h - qh, width: q, height: qh)
+            return CGRect(x: area.minX + halfW, y: area.minY + halfH, width: w - halfW, height: h - halfH)
         case .bottomLeft:
-            return CGRect(x: area.minX, y: area.minY, width: q, height: qh)
+            return CGRect(x: area.minX, y: area.minY, width: halfW, height: halfH)
         case .bottomRight:
-            return CGRect(x: area.minX + w - q, y: area.minY, width: q, height: qh)
+            return CGRect(x: area.minX + halfW, y: area.minY, width: w - halfW, height: halfH)
         case .leftThird:
             return CGRect(x: area.minX, y: area.minY, width: col, height: h)
         case .centerThird:

@@ -94,10 +94,10 @@ def tile(name):
         "centerThird": (VX + tw, VY, tw, VH),
         "rightThird": (VX + 2 * tw, VY, VW - 2 * tw, VH),
         "leftThird": (VX, VY, tw, VH),
-        "bottomLeft": (VX, VY, qw, qh),
-        "bottomRight": (VX + VW - qw, VY, qw, qh),
-        "topLeft": (VX, VY + VH - qh, qw, qh),
-        "topRight": (VX + VW - qw, VY + VH - qh, qw, qh),
+        "bottomLeft": (VX, VY, VW / 2, VH / 2),
+        "bottomRight": (VX + VW / 2, VY, VW / 2, VH / 2),
+        "topLeft": (VX, VY + VH / 2, VW / 2, VH / 2),
+        "topRight": (VX + VW / 2, VY + VH / 2, VW / 2, VH / 2),
     }[name]
 
 

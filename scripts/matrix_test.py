@@ -68,9 +68,9 @@ def tile(name, col, row, cols=2, rows=2):
 
 
 def quarter(col, row):
-    """Cocoa rect of a 1/4 x 1/4 corner tile: col 0 = left, row 0 = bottom."""
-    qw, qh = VW / 4.0, VH / 4.0
-    return (VX + col * (VW - qw), VY + row * (VH - qh), qw, qh)
+    """Cocoa rect of a corner quadrant (half width x half height): col 0 = left,
+    row 0 = bottom. Four quadrants tile the visible frame 2x2."""
+    return (VX + col * (VW / 2.0), VY + row * (VH / 2.0), VW / 2.0, VH / 2.0)
 
 
 QUARTERS = {
