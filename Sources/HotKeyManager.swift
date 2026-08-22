@@ -66,6 +66,24 @@ final class HotKeyManager {
             &hotKeyID
         )
         guard status == noErr, let action = handlers[hotKeyID.id] else { return }
+        // Log the modifiers AS DELIVERED so swallowed/stripped modifiers
+        // (e.g. by keyboard utilities) are visible in /tmp/glass.log.
+        var mods = UInt32(0)
+        _ = GetEventParameter(
+            event,
+            EventParamName(kEventParamKeyModifiers),
+            EventParamType(typeUInt32),
+            nil,
+            MemoryLayout<UInt32>.size,
+            nil,
+            &mods
+        )
+        var names: [String] = []
+        if mods & UInt32(cmdKey) != 0 { names.append("cmd") }
+        if mods & UInt32(optionKey) != 0 { names.append("opt") }
+        if mods & UInt32(shiftKey) != 0 { names.append("shift") }
+        if mods & UInt32(controlKey) != 0 { names.append("ctrl") }
+        WindowEngine.logForHotKeys("hotkey id=\(hotKeyID.id) delivered=[\(names.joined(separator: "+"))] raw=\(mods) -> \(action.rawValue)")
         DispatchQueue.main.async { handler(action) }
     }
 }

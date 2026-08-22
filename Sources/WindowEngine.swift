@@ -49,6 +49,11 @@ final class WindowEngine {
         }
     }
 
+    /// Hotkey-level logging (modifier delivery diagnostics).
+    static func logForHotKeys(_ line: String) {
+        log(line)
+    }
+
     /// System dialog once per process. Hotkeys must never re-prompt.
     private static var promptedThisSession = false
 
