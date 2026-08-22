@@ -1,26 +1,25 @@
 import AppKit
 import ApplicationServices
 
+// MARK: - Shortcut recorder (key-capture logic unchanged, keycap styling)
+
 /// A control that records a global shortcut when the user presses keys.
 final class ShortcutRecorderView: NSView {
     var onRecorded: ((Shortcut) -> Void)?
     private(set) var current: Shortcut?
+    private let label = NSTextField(labelWithString: "")
 
     override var acceptsFirstResponder: Bool { true }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.cornerRadius = 8
-        layer?.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
-        layer?.borderWidth = 1
-        layer?.borderColor = NSColor.white.withAlphaComponent(0.15).cgColor
+        applyStyle(recording: false)
 
-        let label = NSTextField(labelWithString: "Press shortcut…")
-        label.font = .systemFont(ofSize: 13, weight: .medium)
+        label.font = .monospacedSystemFont(ofSize: 12, weight: .semibold)
         label.alignment = .center
+        label.textColor = NSColor.white.withAlphaComponent(0.92)
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.tag = 1
         addSubview(label)
         NSLayoutConstraint.activate([
             label.centerXAnchor.constraint(equalTo: centerXAnchor),
@@ -30,14 +29,50 @@ final class ShortcutRecorderView: NSView {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    func setShortcut(_ shortcut: Shortcut?) {
-        current = shortcut
-        let label = viewWithTag(1) as? NSTextField
-        label?.stringValue = shortcut?.displayString ?? "Press shortcut…"
-        label?.font = shortcut != nil ? .systemFont(ofSize: 13, weight: .medium) : .systemFont(ofSize: 13)
+    private func applyStyle(recording: Bool) {
+        guard let layer else { return }
+        layer.cornerRadius = 7
+        if recording {
+            layer.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.20).cgColor
+            layer.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.95).cgColor
+            layer.borderWidth = 1.5
+            layer.shadowColor = NSColor.controlAccentColor.cgColor
+            layer.shadowOpacity = 0.55
+            layer.shadowRadius = 7
+            layer.shadowOffset = .zero
+        } else {
+            // Keycap: lit top edge, soft drop shadow below.
+            layer.backgroundColor = NSColor.white.withAlphaComponent(0.07).cgColor
+            layer.borderColor = NSColor.white.withAlphaComponent(0.16).cgColor
+            layer.borderWidth = 1
+            layer.shadowColor = NSColor.black.cgColor
+            layer.shadowOpacity = 0.4
+            layer.shadowRadius = 1.5
+            layer.shadowOffset = CGSize(width: 0, height: 1)
+        }
     }
 
-    // MARK: - Key capture
+    override func becomeFirstResponder() -> Bool {
+        applyStyle(recording: true)
+        label.textColor = .white
+        return super.becomeFirstResponder()
+    }
+
+    override func resignFirstResponder() -> Bool {
+        applyStyle(recording: false)
+        label.textColor = NSColor.white.withAlphaComponent(0.92)
+        return super.resignFirstResponder()
+    }
+
+    func setShortcut(_ shortcut: Shortcut?) {
+        current = shortcut
+        label.stringValue = shortcut?.displayString ?? "···"
+        label.textColor = shortcut != nil
+            ? NSColor.white.withAlphaComponent(0.92)
+            : NSColor.white.withAlphaComponent(0.32)
+    }
+
+    // MARK: Key capture
 
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 { // Esc cancels
@@ -68,31 +103,61 @@ extension Shortcut {
     }
 }
 
-/// The glass settings window: translucent material, rounded glass card.
+// MARK: - Compact action names for the grid
+
+extension WindowAction {
+    /// Tight label for the settings grid.
+    var shortName: String {
+        switch self {
+        case .leftHalf: return "Left ½"
+        case .rightHalf: return "Right ½"
+        case .topHalf: return "Top ½"
+        case .bottomHalf: return "Bottom ½"
+        case .topLeft: return "Slide ←"
+        case .topRight: return "Slide →"
+        case .bottomLeft: return "Slide ↓"
+        case .bottomRight: return "Slide ↑"
+        case .leftThird: return "Third ◂"
+        case .centerThird: return "Third ▪"
+        case .rightThird: return "Third ▸"
+        case .leftTwoThirds: return "⅔ Left"
+        case .rightTwoThirds: return "⅔ Right"
+        case .maximize: return "Maximize"
+        case .almostMaximize: return "Almost"
+        case .center: return "Center"
+        case .restore: return "Restore"
+        case .nextDisplay: return "Display ▸"
+        case .previousDisplay: return "Display ◂"
+        }
+    }
+}
+
+// MARK: - Settings panel
+
+/// Frosted, sectioned glass control panel.
 final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     static let shared = SettingsWindowController()
 
     private var recorders: [WindowAction: ShortcutRecorderView] = [:]
-    private var axStatus: NSTextField?
-    private var grantButton: NSButton?
-    private var showPromptButton: NSButton?
+    private var accessChip: AccessChip?
     private var gapField: NSTextField?
     private var gapStepper: NSStepper?
+    private var loginSwitch: NSSwitch?
 
     private static let gapRange = 0...40
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 640),
+            contentRect: NSRect(x: 0, y: 0, width: 620, height: 720),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
-        window.title = "Glass — Shortcuts"
+        window.title = "Glass — Settings"
         window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
-        window.titleVisibility = .hidden
         super.init(window: window)
         buildUI()
         loadShortcuts()
@@ -100,44 +165,24 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    @objc private func grantTapped() {
-        refreshTrustStatus()
-        guard !WindowEngine.isTrusted() else { return }  // already granted — never re-prompt
-        // One click: raise the system consent prompt (it has its own “Open
-        // System Settings” button) AND deep-link straight into the
-        // Accessibility pane, so the user never has to hunt for it.
-        WindowEngine.requestTrust()
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            NSWorkspace.shared.open(url)
-        }
-        refreshTrustStatus(after: 2)
-    }
+    // MARK: Builders
 
-    private func refreshTrustStatus(after delay: TimeInterval = 0) {
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self, let label = self.axStatus else { return }
-            let button = self.grantButton
-            let prompt = self.showPromptButton
-            if WindowEngine.isTrusted() {
-                label.stringValue = "Granted — Glass can move windows ✓"
-                label.textColor = .systemGreen
-                button?.isEnabled = false
-                button?.title = "Granted"
-                prompt?.isEnabled = false
-            } else {
-                label.stringValue = "Not granted yet — allow Glass in System Settings"
-                label.textColor = .systemOrange
-                button?.isEnabled = true
-                button?.title = "Grant Access…"
-                prompt?.isEnabled = true
-            }
-        }
+    private func captionLabel(_ text: String) -> NSTextField {
+        let para = NSMutableParagraphStyle()
+        para.lineSpacing = 2
+        let attr = NSAttributedString(string: text.uppercased(), attributes: [
+            .font: NSFont.systemFont(ofSize: 10, weight: .bold),
+            .foregroundColor: NSColor.secondaryLabelColor,
+            .kern: 1.2,
+            .paragraphStyle: para,
+        ])
+        let l = NSTextField(labelWithAttributedString: attr)
+        return l
     }
 
     private func buildUI() {
         guard let window else { return }
 
-        // Full-bleed vibrancy: the classic glass look.
         let effectView = NSVisualEffectView(frame: window.contentView!.bounds)
         effectView.autoresizingMask = [.width, .height]
         effectView.material = .underWindowBackground
@@ -145,177 +190,120 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         effectView.state = .active
         window.contentView = effectView
 
-        // Title — compact header: tight, hierarchical, tooltip carries detail.
-        let title = NSTextField(labelWithString: "Shortcuts")
-        title.font = .systemFont(ofSize: 18, weight: .bold)
-        title.textColor = NSColor.labelColor
-        title.toolTip = "Global shortcuts tile the frontmost window of any app."
-        let subtitle = NSTextField(labelWithString: "Click a shortcut, then press the keys you want to bind. Esc resets.")
-        subtitle.font = .systemFont(ofSize: 11)
-        subtitle.textColor = .secondaryLabelColor
-        subtitle.toolTip = "Shortcuts need at least one of ⌘, ⌥ or ⌃."
+        let content = NSView()
+        content.translatesAutoresizingMaskIntoConstraints = false
+        effectView.addSubview(content)
 
+        // ── Header ──────────────────────────────────────────────────────
+        let iconTile = NSView()
+        iconTile.wantsLayer = true
+        iconTile.layer?.cornerRadius = 10
+        iconTile.layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.22).cgColor
+        iconTile.layer?.borderWidth = 1
+        iconTile.layer?.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
+        let icon = NSTextField(labelWithString: "")
+        if let base = NSImage(systemSymbolName: "square.grid.2x2.fill", accessibilityDescription: "Glass")?
+            .withSymbolConfiguration(.init(pointSize: 17, weight: .medium)) {
+            let tinted = NSImage(size: base.size, flipped: false) { rect in
+                NSColor.controlAccentColor.setFill()
+                rect.fill()
+                base.draw(in: rect)
+                return true
+            }
+            let attachment = NSTextAttachment()
+            attachment.image = tinted
+            icon.attributedStringValue = NSAttributedString(attachment: attachment)
+        }
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        iconTile.addSubview(icon)
+        NSLayoutConstraint.activate([
+            iconTile.widthAnchor.constraint(equalToConstant: 38),
+            iconTile.heightAnchor.constraint(equalToConstant: 38),
+            icon.centerXAnchor.constraint(equalTo: iconTile.centerXAnchor),
+            icon.centerYAnchor.constraint(equalTo: iconTile.centerYAnchor),
+        ])
+
+        let title = NSTextField(labelWithString: "Glass")
+        title.font = .systemFont(ofSize: 21, weight: .bold)
+        title.textColor = .labelColor
+        let subtitle = NSTextField(labelWithString: "Window tiling · press a key cap to rebind")
+        subtitle.font = .systemFont(ofSize: 12)
+        subtitle.textColor = .secondaryLabelColor
         let titleBlock = NSStackView(views: [title, subtitle])
         titleBlock.orientation = .vertical
-        titleBlock.alignment = .centerX
-        titleBlock.spacing = 2
+        titleBlock.alignment = .leading
+        titleBlock.spacing = 1
 
-        // Accessibility gate — one click, no manual Settings spelunking.
-        let axStatusLabel = NSTextField(labelWithString: "")
-        axStatusLabel.font = .systemFont(ofSize: 11)
-        axStatusLabel.lineBreakMode = .byTruncatingTail
-        axStatusLabel.toolTip = "Glass moves other apps' windows via the Accessibility API."
-        axStatus = axStatusLabel
-        let grantButton = NSButton(title: "Grant Access…", target: self, action: #selector(grantTapped))
-        grantButton.bezelStyle = .rounded
-        grantButton.controlSize = .small
-        grantButton.toolTip = "Opens System Settings → Privacy & Security → Accessibility for Glass."
-        self.grantButton = grantButton
-        let axRow = NSStackView(views: [axStatusLabel, grantButton])
-        axRow.orientation = .horizontal
-        axRow.spacing = 10
-
-        let gapRow = makeGapRow()
-
-        let header = NSStackView(views: [titleBlock, axRow, gapRow])
-        header.orientation = .vertical
-        header.alignment = .centerX
-        header.spacing = 8
-        header.translatesAutoresizingMaskIntoConstraints = false
-        header.setContentHuggingPriority(.required, for: .vertical)
+        accessChip = AccessChip(onGrant: #selector(grantTapped), target: self)
         refreshTrustStatus()
 
-        // One glass row per action, inside a scroll view (19 actions won't fit).
-        let rowsStack = NSStackView()
-        rowsStack.orientation = .vertical
-        rowsStack.alignment = .width
-        rowsStack.spacing = 6
-        rowsStack.translatesAutoresizingMaskIntoConstraints = false
-
-        // Two shortcut cells per line, centered (compact grid, not full-width rows).
-        var pair: [NSView] = []
-        for action in WindowAction.allCases {
-            pair.append(makeRow(for: action))
-            if pair.count == 2 {
-                let line = NSStackView(views: pair)
-                line.orientation = .horizontal
-                line.alignment = .centerY
-                line.spacing = 8
-                line.translatesAutoresizingMaskIntoConstraints = false
-                rowsStack.addArrangedSubview(line)
-                pair = []
-            }
-        }
-        if !pair.isEmpty {
-            let line = NSStackView(views: pair)
-            line.orientation = .horizontal
-            line.alignment = .centerY
-            line.spacing = 8
-            line.translatesAutoresizingMaskIntoConstraints = false
-            rowsStack.addArrangedSubview(line)
-        }
-
-        let document = FlippedView()
-        document.translatesAutoresizingMaskIntoConstraints = false
-        document.addSubview(rowsStack)
-
-        let scroll = NSScrollView()
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        scroll.drawsBackground = false
-        scroll.contentView.drawsBackground = false
-        scroll.borderType = .noBorder
-        scroll.hasVerticalScroller = true
-        scroll.hasHorizontalScroller = false
-        scroll.autohidesScrollers = true
-        scroll.scrollerStyle = .overlay
-        scroll.documentView = document
-        scroll.setContentHuggingPriority(.defaultLow, for: .vertical)
-        scroll.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
-
+        let header = NSStackView(views: [iconTile, titleBlock, accessChip!])
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = 12
+        header.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(header)
         NSLayoutConstraint.activate([
-            rowsStack.topAnchor.constraint(equalTo: document.topAnchor),
-            rowsStack.leadingAnchor.constraint(equalTo: document.leadingAnchor),
-            rowsStack.trailingAnchor.constraint(equalTo: document.trailingAnchor),
-            rowsStack.bottomAnchor.constraint(equalTo: document.bottomAnchor),
-            document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+            header.topAnchor.constraint(equalTo: content.topAnchor, constant: 22),
+            header.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 22),
+            header.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -22),
+            titleBlock.widthAnchor.constraint(greaterThanOrEqualToConstant: 200),
         ])
 
-        // Footer: settings on the left, actions right-aligned.
-        let resetButton = NSButton(title: "Reset", target: self, action: #selector(resetTapped))
-        resetButton.bezelStyle = .rounded
-        resetButton.controlSize = .small
-        resetButton.toolTip = "Restore the built-in default shortcuts for every action."
+        // ── Sections (scrollable) ───────────────────────────────────────
+        let sections: [(String, [WindowAction])] = [
+            ("Halves", [.leftHalf, .rightHalf, .topHalf, .bottomHalf]),
+            ("Quarters · relative slide", [.topLeft, .topRight, .bottomLeft, .bottomRight]),
+            ("Thirds", [.leftThird, .centerThird, .rightThird]),
+            ("Two thirds · Displays", [.leftTwoThirds, .rightTwoThirds, .previousDisplay, .nextDisplay]),
+            ("Window", [.maximize, .almostMaximize, .center, .restore]),
+        ]
 
-        let showButton = NSButton(title: "Grant Access…", target: self, action: #selector(trustTapped))
-        showButton.bezelStyle = .rounded
-        showButton.controlSize = .small
-        showButton.toolTip = "Shows the macOS prompt that grants Glass Accessibility access."
-        showButton.isEnabled = !WindowEngine.isTrusted()
-        showPromptButton = showButton
+        let sectionsStack = NSStackView()
+        sectionsStack.orientation = .vertical
+        sectionsStack.alignment = .leading
+        sectionsStack.spacing = 16
+        sectionsStack.translatesAutoresizingMaskIntoConstraints = false
 
-        let loginCheckbox = NSButton(
-            checkboxWithTitle: "Launch at Login",
-            target: self,
-            action: #selector(launchAtLoginToggled(_:))
-        )
-        loginCheckbox.font = .systemFont(ofSize: 12)
-        loginCheckbox.state = LaunchAtLogin.isEnabled ? .on : .off
-        loginCheckbox.toolTip = "Start Glass automatically when you sign in to your Mac."
-        loginCheckbox.setContentHuggingPriority(.required, for: .horizontal)
+        for (caption, actions) in sections {
+            sectionsStack.addArrangedSubview(captionLabel(caption))
 
-        let actions = NSStackView(views: [resetButton, showButton])
-        actions.orientation = .horizontal
-        actions.spacing = 8
-        actions.setContentHuggingPriority(.required, for: .horizontal)
+            let cells = actions.map { makeCell(for: $0) }
+            let grid = NSStackView(views: cells)
+            grid.orientation = .horizontal
+            grid.alignment = .top
+            grid.distribution = .fillEqually
+            grid.spacing = 8
+            grid.translatesAutoresizingMaskIntoConstraints = false
 
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.init(1), for: .horizontal)
-        spacer.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+            let card = GlassPanel(child: grid, insets: (12, 12, 12, 12))
+            // Stretch every card to the full section width (stack alignment
+            // alone is unreliable for custom views).
+            card.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            sectionsStack.addArrangedSubview(card)
+            NSLayoutConstraint.activate([
+                card.leadingAnchor.constraint(equalTo: sectionsStack.leadingAnchor),
+                card.trailingAnchor.constraint(equalTo: sectionsStack.trailingAnchor),
+            ])
+        }
 
-        let footer = NSStackView(views: [loginCheckbox, spacer, actions])
-        footer.orientation = .horizontal
-        footer.alignment = .centerY
-        footer.spacing = 12
-        footer.translatesAutoresizingMaskIntoConstraints = false
-        footer.setContentHuggingPriority(.required, for: .vertical)
-
-        let container = NSStackView(views: [header, scroll, footer])
-        container.orientation = .vertical
-        container.alignment = .width
-        container.spacing = 12
-        container.translatesAutoresizingMaskIntoConstraints = false
-        effectView.addSubview(container)
-
-        NSLayoutConstraint.activate([
-            container.leadingAnchor.constraint(equalTo: effectView.leadingAnchor, constant: 20),
-            container.trailingAnchor.constraint(equalTo: effectView.trailingAnchor, constant: -20),
-            container.topAnchor.constraint(equalTo: effectView.topAnchor, constant: 24),
-            container.bottomAnchor.constraint(equalTo: effectView.bottomAnchor, constant: -16),
-        ])
-    }
-
-    private func makeGapRow() -> NSView {
-        let label = NSTextField(labelWithString: "Gap")
-        label.font = .systemFont(ofSize: 13, weight: .medium)
-        label.textColor = NSColor.labelColor
-
+        // ── Controls strip ──────────────────────────────────────────────
+        let gapCaption = captionLabel("Tiling gap")
         let formatter = NumberFormatter()
         formatter.allowsFloats = false
         formatter.minimum = 0
         formatter.maximum = 40
         formatter.maximumFractionDigits = 0
-
         let field = NSTextField(string: "\(clampedGap(GlassSettings.gap))")
         field.alignment = .right
-        field.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+        field.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         field.formatter = formatter
         field.target = self
         field.action = #selector(gapFieldChanged)
         field.delegate = self
         field.translatesAutoresizingMaskIntoConstraints = false
-        field.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        field.widthAnchor.constraint(equalToConstant: 40).isActive = true
         gapField = field
-
         let stepper = NSStepper()
         stepper.minValue = Double(Self.gapRange.lowerBound)
         stepper.maxValue = Double(Self.gapRange.upperBound)
@@ -325,45 +313,159 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         stepper.target = self
         stepper.action = #selector(gapStepperChanged)
         gapStepper = stepper
+        let px = NSTextField(labelWithString: "px")
+        px.font = .systemFont(ofSize: 11)
+        px.textColor = .tertiaryLabelColor
 
-        let row = NSStackView(views: [label, field, stepper])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 8
-        return row
+        let loginCaption = captionLabel("Launch at login")
+        let loginToggle = NSSwitch()
+        loginToggle.controlSize = .small
+        loginToggle.state = LaunchAtLogin.isEnabled ? .on : .off
+        loginToggle.target = self
+        loginToggle.action = #selector(launchAtLoginToggled(_:))
+        loginToggle.toolTip = "Start Glass automatically when you sign in."
+        loginSwitch = loginToggle
+
+        let gapGroup = NSStackView(views: [gapCaption, field, stepper, px])
+        gapGroup.orientation = .horizontal
+        gapGroup.alignment = .centerY
+        gapGroup.spacing = 7
+        let loginGroup = NSStackView(views: [loginToggle, loginCaption])
+        loginGroup.orientation = .horizontal
+        loginGroup.alignment = .centerY
+        loginGroup.spacing = 7
+
+        let controls = GlassPanel(
+            child: hstack([gapGroup, spacer(), loginGroup], spacing: 12),
+            insets: (12, 12, 10, 10)
+        )
+
+        // ── Footer ──────────────────────────────────────────────────────
+        let divider = NSBox()
+        divider.boxType = .separator
+        divider.translatesAutoresizingMaskIntoConstraints = false
+
+        let brand = NSTextField(labelWithString: "GLASS")
+        let bAttr = NSAttributedString(string: "GLASS", attributes: [
+            .font: NSFont.systemFont(ofSize: 9, weight: .bold),
+            .foregroundColor: NSColor.tertiaryLabelColor,
+            .kern: 2.0,
+        ])
+        brand.attributedStringValue = bAttr
+
+        let reset = NSButton(title: "Reset to Defaults", target: self, action: #selector(resetTapped))
+        reset.bezelStyle = .rounded
+        reset.controlSize = .small
+        reset.toolTip = "Restore built-in shortcuts, gap and layout."
+
+        let footer = hstack([brand, spacer(), reset], spacing: 12)
+        footer.translatesAutoresizingMaskIntoConstraints = false
+
+        // ── Assemble ────────────────────────────────────────────────────
+        let document = FlippedView(child: sectionsStack)
+        document.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(sectionsStack)
+
+        let scroll = NSScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.drawsBackground = false
+        scroll.contentView.drawsBackground = false
+        scroll.borderType = .noBorder
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .overlay
+        scroll.documentView = document
+
+        content.addSubview(scroll)
+        content.addSubview(controls)
+        content.addSubview(divider)
+        content.addSubview(footer)
+        // Autoresizing masks would otherwise inject required height=0 /
+        // centering constraints that collapse the fixed bottom strip.
+        controls.translatesAutoresizingMaskIntoConstraints = false
+        divider.translatesAutoresizingMaskIntoConstraints = false
+        footer.translatesAutoresizingMaskIntoConstraints = false
+
+        NSLayoutConstraint.activate([
+            content.leadingAnchor.constraint(equalTo: effectView.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: effectView.trailingAnchor),
+            content.topAnchor.constraint(equalTo: effectView.topAnchor),
+            content.bottomAnchor.constraint(equalTo: effectView.bottomAnchor),
+            // Design-size floor: without this, AppKit shrinks the window to
+            // the content view's fitting size during layout.
+            content.widthAnchor.constraint(greaterThanOrEqualToConstant: 620),
+            content.heightAnchor.constraint(greaterThanOrEqualToConstant: 720),
+
+            scroll.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 18),
+            scroll.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 22),
+            scroll.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -22),
+            scroll.bottomAnchor.constraint(equalTo: controls.topAnchor, constant: -12),
+
+            controls.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 22),
+            controls.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -22),
+            controls.bottomAnchor.constraint(equalTo: divider.topAnchor, constant: -12),
+
+            sectionsStack.leadingAnchor.constraint(equalTo: document.leadingAnchor),
+            sectionsStack.trailingAnchor.constraint(equalTo: document.trailingAnchor),
+            sectionsStack.topAnchor.constraint(equalTo: document.topAnchor, constant: 2),
+            sectionsStack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -8),
+            document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+
+            divider.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 22),
+            divider.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -22),
+            divider.bottomAnchor.constraint(equalTo: footer.topAnchor, constant: -10),
+
+            footer.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 22),
+            footer.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -22),
+            footer.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -14),
+        ])
     }
 
-    private func makeRow(for action: WindowAction) -> NSView {
-        let label = NSTextField(labelWithString: action.displayName)
+    private func makeCell(for action: WindowAction) -> NSView {
+        let label = NSTextField(labelWithString: action.shortName)
         label.font = .systemFont(ofSize: 11, weight: .medium)
         label.textColor = NSColor.labelColor
         label.alignment = .center
-        label.toolTip = "Shortcut that tiles the frontmost window."
+        label.lineBreakMode = .byTruncatingTail
+        label.toolTip = action.displayName
 
         let recorder = ShortcutRecorderView(frame: .zero)
         recorder.setShortcut(ShortcutsStore.shared.shortcuts[action])
-        recorder.toolTip = "Click, then press a new combo (needs ⌘, ⌥ or ⌃). Esc resets."
+        recorder.toolTip = "Click, then press the new combo (\(action.displayName)). Esc cancels."
         recorder.onRecorded = { [weak self] shortcut in
             ShortcutsStore.shared.set(shortcut, for: action)
             HotKeyManager.shared.refresh()
             self?.sync()
         }
         recorder.translatesAutoresizingMaskIntoConstraints = false
-        recorder.widthAnchor.constraint(equalToConstant: 132).isActive = true
         recorder.heightAnchor.constraint(equalToConstant: 26).isActive = true
 
-        // Compact centered cell: name on top, shortcut pill below.
         let cell = NSStackView(views: [label, recorder])
         cell.orientation = .vertical
         cell.alignment = .centerX
         cell.spacing = 6
         cell.translatesAutoresizingMaskIntoConstraints = false
-        cell.heightAnchor.constraint(equalToConstant: 60).isActive = true
-
-        let glass = GlassCard(row: cell)
         recorders[action] = recorder
-        return glass
+        return cell
     }
+
+    private func hstack(_ views: [NSView], spacing: CGFloat) -> NSStackView {
+        let s = NSStackView(views: views)
+        s.orientation = .horizontal
+        s.alignment = .centerY
+        s.spacing = spacing
+        s.translatesAutoresizingMaskIntoConstraints = false
+        return s
+    }
+
+    private func spacer() -> NSView {
+        let v = NSView()
+        v.setContentHuggingPriority(.init(1), for: .horizontal)
+        v.setContentCompressionResistancePriority(.init(1), for: .horizontal)
+        return v
+    }
+
+    // MARK: State
 
     private func loadShortcuts() { sync() }
 
@@ -391,6 +493,26 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         syncGap()
     }
 
+    // MARK: Actions
+
+    @objc private func grantTapped() {
+        refreshTrustStatus()
+        guard !WindowEngine.isTrusted() else { return }  // already granted — never re-prompt
+        // One click: raise the system consent prompt AND deep-link into the
+        // Accessibility pane.
+        WindowEngine.requestTrust()
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+        refreshTrustStatus(after: 2)
+    }
+
+    private func refreshTrustStatus(after delay: TimeInterval = 0) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.accessChip?.setGranted(WindowEngine.isTrusted())
+        }
+    }
+
     @objc private func gapStepperChanged(_ sender: NSStepper) {
         applyGap(sender.integerValue)
     }
@@ -404,9 +526,8 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         applyGap(gapField?.integerValue ?? 0)
     }
 
-    @objc private func launchAtLoginToggled(_ sender: NSButton) {
-        let wantEnabled = sender.state == .on
-        if !LaunchAtLogin.setEnabled(wantEnabled) {
+    @objc private func launchAtLoginToggled(_ sender: NSSwitch) {
+        if !LaunchAtLogin.setEnabled(sender.state == .on) {
             NSSound.beep()
             sender.state = LaunchAtLogin.isEnabled ? .on : .off
         }
@@ -418,37 +539,101 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         HotKeyManager.shared.refresh()
         sync()
     }
-
-    @objc private func trustTapped() {
-        WindowEngine.requestTrust()
-    }
 }
 
-/// A rounded translucent card that gives each row a "glass" feel.
-final class GlassCard: NSView {
-    init(row: NSView) {
+// MARK: - Supporting views
+
+/// Rounded frosted panel that wraps a child with insets.
+final class GlassPanel: NSView {
+    init(child: NSView, insets: (CGFloat, CGFloat, CGFloat, CGFloat)) {
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 12
+        layer?.cornerRadius = 14
         layer?.backgroundColor = NSColor.white.withAlphaComponent(0.05).cgColor
         layer?.borderWidth = 1
-        layer?.borderColor = NSColor.white.withAlphaComponent(0.12).cgColor
+        layer?.borderColor = NSColor.white.withAlphaComponent(0.10).cgColor
 
-        row.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(row)
+        child.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(child)
         NSLayoutConstraint.activate([
-            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
-            row.topAnchor.constraint(equalTo: topAnchor, constant: 10),
-            row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -10),
-            heightAnchor.constraint(greaterThanOrEqualToConstant: 46),
+            child.leadingAnchor.constraint(equalTo: leadingAnchor, constant: insets.0),
+            child.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -insets.1),
+            child.topAnchor.constraint(equalTo: topAnchor, constant: insets.2),
+            child.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -insets.3),
         ])
     }
 
     required init?(coder: NSCoder) { fatalError() }
 }
 
-/// Top-origin document so shortcut rows start at the top of the scroll view.
+/// Header status capsule: green "active" or amber "needs access" + grant button.
+final class AccessChip: NSView {
+    private let dot = NSView()
+    private let label = NSTextField(labelWithString: "")
+    private let button: NSButton
+
+    init(onGrant: Selector, target: AnyObject?) {
+        button = NSButton(title: "Grant…", target: target, action: onGrant)
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.cornerRadius = 13
+        layer?.backgroundColor = NSColor.white.withAlphaComponent(0.06).cgColor
+        layer?.borderWidth = 1
+        layer?.borderColor = NSColor.white.withAlphaComponent(0.12).cgColor
+
+        dot.wantsLayer = true
+        dot.layer?.cornerRadius = 4
+        label.font = .systemFont(ofSize: 11, weight: .medium)
+        label.textColor = .secondaryLabelColor
+        button.bezelStyle = .rounded
+        button.controlSize = .small
+        button.isHidden = true
+
+        let row = NSStackView(views: [dot, label, button])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 7
+        row.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            row.topAnchor.constraint(equalTo: topAnchor, constant: 6),
+            row.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
+            dot.widthAnchor.constraint(equalToConstant: 8),
+            dot.heightAnchor.constraint(equalToConstant: 8),
+        ])
+        setGranted(false)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    func setGranted(_ granted: Bool) {
+        dot.layer?.backgroundColor = (granted ? NSColor.systemGreen : NSColor.systemOrange).cgColor
+        label.stringValue = granted ? "Accessibility active" : "Accessibility needed"
+        button.isHidden = granted
+        invalidateIntrinsicContentSize()
+    }
+}
+
+/// Top-origin document sized by its content, so the scroll view tiles
+/// correctly even before the window is ever shown.
 private final class FlippedView: NSView {
+    private let child: NSView
+
+    init(child: NSView) {
+        self.child = child
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
     override var isFlipped: Bool { true }
+
+    override var intrinsicContentSize: NSSize { child.fittingSize }
+
+    override func layout() {
+        super.layout()
+        invalidateIntrinsicContentSize()
+    }
 }
