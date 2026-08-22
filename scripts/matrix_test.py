@@ -175,9 +175,10 @@ def main():
         ("topRight", (1296, 832, 432, 252), (VX + VW - 864, VY + VH - 560, 864, 560)),
         ("bottomLeft", (0, 90, 554, 252), (VX, VY, 864, 560)),
         ("bottomRight", (0, 90, 432, 248.5), (VX + VW - 864, VY, 864, 560), "topRight"),  # -> from bottom-left
-        ("topHalf", (0, 90, 1728, 993), (VX, VY + VH - 560, 864, 560)),              # full-width hugs left
-        ("bottomHalf", (0, 587, 1728, 497), (VX, VY, 864, 560)),
-        ("rightHalf", (1296, 90, 432, 993), (VX + VW - 864, VY, 864, 560)),
+        ("topHalf", (0, 90, 1728, 993), (VX + (VW - 864) / 2, VY + VH - 560, 864, 560)),   # width-clamped -> centered
+        ("bottomHalf", (0, 587, 1728, 497), (VX + (VW - 864) / 2, VY, 864, 560)),
+        ("rightHalf", (1296, 90, 432, 993), (VX + VW - 864, VY + (VH - 560) / 2, 864, 560)),
+        ("leftHalf", (0, 90, 432, 993), (VX, VY + (VH - 560) / 2, 864, 560)),
     ]
     for case in cases:
         action, start, expected = case[0], case[1], case[2]

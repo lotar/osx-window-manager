@@ -187,8 +187,20 @@ final class WindowEngine {
             if let probed = settledFrame(of: window),
                abs(probed.size.width - target.width) > 0.5 || abs(probed.size.height - target.height) > 0.5 {
                 Self.log("perform(\(action.rawValue)) probe clamp \(target.size) -> \(probed.size) app=\(appName)")
-                clampedTo = probed.size
-                target = Self.pinnedRect(target: target, actualSize: probed.size, action: resolved)
+                var size = probed.size
+                // Some apps shrink BOTH dimensions when either is below their
+                // minimum (e.g. Slack: ask 1728x497, get 868x587). Retry with
+                // the requested width and the height they did accept — often
+                // the width was never actually rejected.
+                if size.width < target.width - 0.5 && size.height >= target.height - 0.5 {
+                    moveImmediate(window, to: CGRect(origin: current.origin, size: CGSize(width: target.width, height: max(size.height, target.height))))
+                    if let retry = settledFrame(of: window), retry.width >= target.width - 0.5 {
+                        Self.log("perform(\(action.rawValue)) probe width recovery \(size) -> \(retry.size)")
+                        size = retry.size
+                    }
+                }
+                clampedTo = size
+                target = Self.pinnedRect(target: target, actualSize: size, action: resolved)
             }
         }
 
@@ -314,9 +326,12 @@ final class WindowEngine {
         switch action {
         case .rightHalf, .topRight, .bottomRight, .rightThird, .rightTwoThirds:
             origin.x = target.maxX - actualSize.width
-        case .centerThird, .maximize, .almostMaximize, .center:
+        case .centerThird, .maximize, .almostMaximize, .center,
+             // Full-width tiles: when an app can't fit the width, center it
+             // so a clamped top/bottom half reads as centered, not parked.
+             .topHalf, .bottomHalf:
             origin.x = target.midX - actualSize.width / 2
-        default: break // left-anchored or full-width
+        default: break // left-anchored
         }
         switch action {
         case .topHalf, .topLeft, .topRight, .leftThird, .centerThird,
@@ -324,6 +339,9 @@ final class WindowEngine {
             origin.y = target.maxY - actualSize.height
         case .bottomHalf, .bottomLeft, .bottomRight:
             origin.y = target.minY
+        // Full-height tiles: center vertically when height-clamped.
+        case .leftHalf, .rightHalf:
+            origin.y = target.midY - actualSize.height / 2
         default: break // vertical center already applied above for center/maximize
         }
         return CGRect(origin: origin, size: actualSize)
