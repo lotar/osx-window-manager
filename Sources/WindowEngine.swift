@@ -29,6 +29,11 @@ final class WindowEngine {
     /// Last cocoa frame snapshotted before a non-restore action.
     private var lastCocoaFrame: CGRect?
 
+    /// Incremented on every perform(); in-flight animations and settle/
+    /// repin callbacks from a previous move abort when superseded, so rapid
+    /// keypresses can't corrupt each other.
+    private var moveGeneration = 0
+
     private static func log(_ line: String) {
         let s = "\(ISO8601DateFormatter().string(from: Date())) \(line)\n"
         guard let data = s.data(using: .utf8) else { return }
@@ -95,7 +100,7 @@ final class WindowEngine {
     /// Animates the window from its current frame to `target` over
     /// `Self.animationDuration` (ease-out). Callers must have snapshotted the
     /// source frame before any move.
-    func moveAnimated(_ window: AXUIElement, from source: CGRect, to target: CGRect) {
+    func moveAnimated(_ window: AXUIElement, from source: CGRect, to target: CGRect, generation: Int? = nil) {
         let duration = Self.animationDuration
         guard duration > 0, source != target else {
             moveImmediate(window, to: target)
@@ -103,6 +108,8 @@ final class WindowEngine {
         }
         let start = Date().timeIntervalSinceReferenceDate
         let timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { t in
+            // A newer move supersedes this animation.
+            if let generation, generation != self.moveGeneration { t.invalidate(); return }
             let elapsed = Date().timeIntervalSinceReferenceDate - start
             let x = min(max(elapsed / duration, 0), 1)
             let ease = 1 - pow(1 - x, 3) // easeOutCubic
@@ -124,6 +131,7 @@ final class WindowEngine {
             }
             if x >= 1 {
                 t.invalidate()
+                if let generation, generation != self.moveGeneration { return }
                 // Snap to the exact target so the final frame is pixel-precise.
                 self.moveImmediate(window, to: target)
             }
@@ -136,6 +144,8 @@ final class WindowEngine {
         // TCC row (old ad-hoc Glass) even when this .app is allowed. Prompting
         // on every hotkey is what the user saw. Try the move; prompt at most once
         // if AX cannot see a window.
+        moveGeneration += 1
+        let generation = moveGeneration
         let trusted = Self.isTrusted()
         Self.log("perform(\(action.rawValue)) animDur=\(String(format: "%.2f", Self.animationDuration))s trusted=\(trusted)")
         guard let window = frontWindow() else {
@@ -160,24 +170,34 @@ final class WindowEngine {
         guard let screen = screen(for: current) else { return }
         let resolved = resolvedAction(for: action, current: current, visible: screen.visibleFrame)
         var target = targetRect(for: resolved, current: current, screen: screen)
+        let appName = NSWorkspace.shared.frontmostApplication?.localizedName ?? "?"
 
         // Probe the size the app will actually accept (many enforce a minimum
         // window size) BEFORE animating, and pin the animation target to the
-        // achievable on-screen rect. Otherwise the window glides past the
-        // screen edge mid-animation and snaps back once the clamp is found.
-        moveImmediate(window, to: CGRect(origin: current.origin, size: target.size))
-        if let probed = cocoaFrame(of: window),
-           abs(probed.size.width - target.width) > 0.5 || abs(probed.size.height - target.height) > 0.5 {
-            Self.log("perform(\(action.rawValue)) probe clamp \(target.size) -> \(probed.size)")
-            target = Self.pinnedRect(target: target, actualSize: probed.size, action: resolved)
+        // achievable on-screen rect. Only needed when shrinking; grows are
+        // effectively never clamped, so skip the latency there.
+        var clampedTo: CGSize?
+        if target.width < current.width - 0.5 || target.height < current.height - 0.5 {
+            moveImmediate(window, to: CGRect(origin: current.origin, size: target.size))
+            if let probed = settledFrame(of: window),
+               abs(probed.size.width - target.width) > 0.5 || abs(probed.size.height - target.height) > 0.5 {
+                Self.log("perform(\(action.rawValue)) probe clamp \(target.size) -> \(probed.size) app=\(appName)")
+                clampedTo = probed.size
+                target = Self.pinnedRect(target: target, actualSize: probed.size, action: resolved)
+            }
         }
 
         lastCocoaFrame = current
-        Self.log("perform(\(action.rawValue)) resolved=\(resolved.rawValue) current=\(current) screen='\(screen.localizedName)' visible=\(screen.visibleFrame) mainH=\(Self.mainScreenHeight()) target=\(target)")
-        moveAnimated(window, from: current, to: target)
+        Self.log("perform(\(action.rawValue)) resolved=\(resolved.rawValue) app=\(appName) current=\(current) screen='\(screen.localizedName)' visible=\(screen.visibleFrame) mainH=\(Self.mainScreenHeight()) target=\(target)")
+        if let minSize = clampedTo {
+            HUD.show("\(resolved.displayName)\n⚠︎ \(appName) min size \(Int(minSize.width))×\(Int(minSize.height))", in: screen)
+        } else {
+            HUD.show(resolved.displayName, in: screen)
+        }
+        moveAnimated(window, from: current, to: target, generation: generation)
         // Safety net: if the app still clamped late, re-pin (no-op normally).
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.animationDuration + 0.1) { [weak self] in
-            guard let self else { return }
+            guard let self, generation == self.moveGeneration else { return }
             self.settleAndRepin(window, target: target, action: resolved)
             if let after = self.cocoaFrame(of: window) {
                 Self.log("perform(\(action.rawValue)) finalRead=\(after) delta=\(CGSize(width: after.minX - target.minX, height: after.minY - target.minY))")
@@ -319,6 +339,19 @@ final class WindowEngine {
         moveImmediate(window, to: fixed)
     }
 
+    /// Reads the window frame repeatedly until it stops changing (apps apply
+    /// min-size clamps asynchronously), bounded to ~0.3s.
+    func settledFrame(of window: AXUIElement, tries: Int = 6, interval: Double = 0.05) -> CGRect? {
+        var last = cocoaFrame(of: window)
+        for _ in 0..<tries {
+            Thread.sleep(forTimeInterval: interval)
+            let now = cocoaFrame(of: window)
+            if now == last { break }
+            last = now
+        }
+        return last
+    }
+
     /// Waits for the app's frame to stop changing (min-size clamps can land
     /// late), then re-pins if the app returned more size than requested.
     func settleAndRepin(_ window: AXUIElement, target: CGRect, action: WindowAction) {
@@ -362,9 +395,29 @@ final class WindowEngine {
     /// re-read → report deltas. Prints a machine-checkable report so geometry
     /// can be verified without interactive hotkeys. Returns nil if no window.
     @discardableResult
-    func debugRoundTrip(action: WindowAction) -> String? {
-        guard let window = frontWindow(), let before = rawQuartzFrame(of: window) else { return nil }
-        let appName = NSWorkspace.shared.frontmostApplication?.localizedName ?? "?"
+    func debugRoundTrip(action: WindowAction, targetPID: Int32? = nil) -> String? {
+        // Either the frontmost app's focused window (default) or a specific
+        // app's focused window (matrix testing without focus games).
+        let window: AXUIElement?
+        if let targetPID {
+            let appEl = AXUIElementCreateApplication(targetPID)
+            var ref: AnyObject?
+            if AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &ref) != .success || ref == nil {
+                // Fall back to the app's first window (matrix harness).
+                var windowsRef: AnyObject?
+                guard
+                    AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute as CFString, &windowsRef) == .success,
+                    let windows = windowsRef as? [AXUIElement], !windows.isEmpty
+                else { return nil }
+                ref = windows[0]
+            }
+            window = (ref! as! AXUIElement)
+        } else {
+            window = frontWindow()
+        }
+        guard let window, let before = rawQuartzFrame(of: window) else { return nil }
+        let appName = NSRunningApplication(processIdentifier: targetPID ?? -1)?.localizedName
+            ?? NSWorkspace.shared.frontmostApplication?.localizedName ?? "?"
         let beforeCocoa = Self.cocoaRect(quartzOrigin: before.origin, size: before.size)
         guard let screen = screen(for: beforeCocoa) else { return nil }
         // Same relative/cycling resolution the hotkey path uses.

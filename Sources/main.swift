@@ -39,6 +39,35 @@ private func runCLI() -> Bool {
         Thread.sleep(forTimeInterval: 0.35)
         return true
     }
+    if let i = args.firstIndex(of: "--dump-resolve"), i + 8 < args.count {
+        // Matrix driver: for a given current rect + visible frame, print every
+        // action's resolved action and target cocoa rect.
+        // Optional 9th/10th args = an app-min clamped actual size, which adds
+        // pinnedRect(target, actualSize) to the output.
+        func num(_ s: String) -> CGFloat { CGFloat(Double(s) ?? 0) }
+        let current = CGRect(x: num(args[i + 1]), y: num(args[i + 2]), width: num(args[i + 3]), height: num(args[i + 4]))
+        let vis = CGRect(x: num(args[i + 5]), y: num(args[i + 6]), width: num(args[i + 7]), height: num(args[i + 8]))
+        let clampSize: CGSize? = i + 10 < args.count
+            ? CGSize(width: num(args[i + 9]), height: num(args[i + 10]))
+            : nil
+        var obj: [String: [String: Double]] = [:]
+        for action in WindowAction.allCases {
+            let resolved = WindowEngine.shared.resolvedAction(for: action, current: current, visible: vis)
+            var target = WindowEngine.shared.layoutRect(for: resolved, current: current, visible: vis)
+            if let clampSize {
+                target = WindowEngine.pinnedRect(target: target, actualSize: clampSize, action: resolved)
+            }
+            obj["\(action.rawValue)=>\(resolved.rawValue)"] = [
+                "x": target.minX, "y": target.minY, "w": target.width, "h": target.height,
+                "cx": target.midX, "cy": target.midY,
+            ]
+        }
+        if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]),
+           let text = String(data: data, encoding: .utf8) {
+            print(text)
+        }
+        return true
+    }
     if let i = args.firstIndex(of: "--roundtrip") {
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
@@ -81,6 +110,7 @@ if runCLI() {
 enum RoundTripDebug {
     static let notifyName = "glass.debug.roundtrip" as CFString
     static let actionFile = "/tmp/glass-roundtrip.action"
+    static let pidFile = "/tmp/glass-roundtrip.pid"
     static let reportFile = "/tmp/glass-roundtrip.log"
 
     static func install() {
@@ -98,8 +128,12 @@ enum RoundTripDebug {
         let requested = (try? String(contentsOfFile: actionFile, encoding: .utf8))?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let action = WindowAction(rawValue: requested) ?? .topHalf
-        let report = WindowEngine.shared.debugRoundTrip(action: action) ?? "no-front-window"
-        try? report.write(toFile: reportFile, atomically: true, encoding: .utf8)
+        let pid = (try? String(contentsOfFile: pidFile, encoding: .utf8))
+            .flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        let seq = (try? String(contentsOfFile: "/tmp/glass-roundtrip.seq", encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "0"
+        let report = WindowEngine.shared.debugRoundTrip(action: action, targetPID: pid) ?? "no-front-window"
+        try? "seq=\(seq) action=\(requested)\n\(report)".write(toFile: reportFile, atomically: true, encoding: .utf8)
     }
 }
 
