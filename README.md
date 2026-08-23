@@ -2,6 +2,8 @@
 
 Menu-bar macOS window manager: global shortcuts tile the frontmost window.
 
+**Site & demo:** https://lotar.github.io/osx-window-manager/
+
 > **Note:** This project is no longer maintained. It was built as an AI agent test/experiment and is provided as-is.
 
 ## Requirements
