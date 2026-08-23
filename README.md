@@ -1,5 +1,12 @@
 # osx-window-manager
 
+> **⚠︎ Not actively maintained.** This was an AI-limits test: a model (Ox Alpha)
+> took a half-broken weekend app and shipped it — features, fixes, tests, docs,
+> this site — in a few days of unattended iterations. It works well for the
+> author's daily use, but there are known gaps and open issues, and there are
+> no plans for regular maintenance. Use it as a reference, fork it, or file
+> issues — but don't expect fixes.
+
 Menu-bar macOS window manager: global shortcuts tile the frontmost window.
 
 **Site & demo:** https://lotar.github.io/osx-window-manager/
