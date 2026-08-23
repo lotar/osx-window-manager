@@ -2,6 +2,8 @@
 
 Menu-bar macOS window manager: global shortcuts tile the frontmost window.
 
+> **Note:** This project is no longer maintained. It was built as an AI agent test/experiment and is provided as-is.
+
 ## Requirements
 
 - macOS 14+
