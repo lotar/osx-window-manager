@@ -55,6 +55,16 @@ Reset to Defaults.
 
 UserDefaults domain `osx-window-manager`.
 
+## CLI (debug/CI)
+
+```bash
+osx-window-manager --dump-layout vx vy vw vh [cx cy cw ch]   # JSON tile geometry (no AX)
+osx-window-manager --trusted                                 # exit 0 if Accessibility granted
+```
+
+Test harnesses: `python3 e2e_test.py` (full suite),
+`python3 scripts/matrix_test.py` (movement matrix, no AX needed).
+
 ## Troubleshooting
 
 - No windows move: grant Accessibility, then relaunch.
