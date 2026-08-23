@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>osx-window-manager — menu-bar window tiling for macOS</title>
+<meta name="description" content="Menu-bar macOS window manager: global shortcuts tile the frontmost window. Halves, thirds, quadrants, displays — all from the keyboard.">
+<style>
+  :root {
+    --bg: #0b0d12;
+    --panel: rgba(255,255,255,0.045);
+    --border: rgba(255,255,255,0.10);
+    --text: #e8eaf0;
+    --muted: #9aa0ae;
+    --accent: #5ac8fa;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background:
+      radial-gradient(1200px 700px at 15% -10%, rgba(90,200,250,0.10), transparent 60%),
+      radial-gradient(1000px 600px at 110% 20%, rgba(190,120,255,0.08), transparent 55%),
+      var(--bg);
+    color: var(--text);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    min-height: 100vh;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 64px 24px 96px; }
+
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 40px; }
+  .icon {
+    width: 44px; height: 44px; border-radius: 11px; flex: none;
+    background: rgba(90,200,250,0.16); border: 1px solid var(--border);
+    display: grid; place-items: center; font-size: 22px;
+  }
+  h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; }
+  h1 .dim { color: var(--muted); font-weight: 500; }
+  header .gh { margin-left: auto; }
+  .btn {
+    display: inline-block; padding: 8px 16px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--panel);
+    color: var(--text); text-decoration: none; font-size: 14px; font-weight: 500;
+    transition: border-color .15s, background .15s;
+  }
+  .btn:hover { border-color: rgba(90,200,250,0.5); background: rgba(90,200,250,0.08); }
+
+  .hero { margin-bottom: 48px; }
+  .hero p.lead { font-size: 19px; color: var(--muted); max-width: 640px; margin-bottom: 28px; }
+  .hero p.lead strong { color: var(--text); font-weight: 600; }
+
+  .video {
+    border-radius: 16px; overflow: hidden;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    box-shadow: 0 24px 80px rgba(0,0,0,0.55);
+  }
+  .video video { display: block; width: 100%; height: auto; }
+  .caption { font-size: 13px; color: var(--muted); margin-top: 10px; }
+
+  h2 {
+    font-size: 12px; font-weight: 700; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--muted);
+    margin: 56px 0 18px;
+  }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 14px; padding: 20px 24px;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  td { padding: 9px 12px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+  tr:last-child td { border-bottom: none; }
+  td.keys { white-space: nowrap; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13.5px; color: var(--accent); width: 1%; }
+  td.desc { color: var(--muted); }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+  .card h3 { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
+  .card p, .card li { font-size: 14px; color: var(--muted); }
+  .card ul { list-style: none; }
+  .card li { padding: 3px 0; }
+  code {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px;
+    background: rgba(255,255,255,0.07); border: 1px solid var(--border);
+    border-radius: 6px; padding: 1px 6px;
+  }
+  pre {
+    background: rgba(0,0,0,0.35); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 16px; overflow-x: auto;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px;
+    color: var(--text);
+  }
+  footer { margin-top: 72px; font-size: 13px; color: var(--muted); }
+  footer a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="icon">▦</div>
+    <h1>osx-window-manager <span class="dim">· Window Manager for macOS</span></h1>
+    <a class="gh" href="https://github.com/lotar/osx-window-manager">GitHub ↗</a>
+  </header>
+
+  <div class="hero">
+    <p class="lead">A <strong>menu-bar window manager</strong> for macOS: global keyboard shortcuts tile the
+    frontmost window — halves, thirds, quadrants, displays. Small, fast, no Dock icon, no bloat.</p>
+    <div class="video">
+      <video src="demo.mp4" autoplay muted loop playsinline></video>
+    </div>
+    <p class="caption">Roughly a third of what it can do. Every tile lands pixel-exact; slides clamp at screen edges.</p>
+  </div>
+
+  <h2>Shortcuts</h2>
+  <div class="card">
+    <table>
+      <tr><td class="keys">⌘⌥ + ← → ↑ ↓</td><td class="desc">Left / right / top / bottom half</td></tr>
+      <tr><td class="keys">⌘⌥ + 1 / 2 / 3</td><td class="desc">Left / center / right third</td></tr>
+      <tr><td class="keys">⌘⌥ + E / R</td><td class="desc">Left / right two-thirds</td></tr>
+      <tr><td class="keys">⌘⌥⇧ + ← → ↑ ↓</td><td class="desc">Slide quarter — relative, clamped at screen edges</td></tr>
+      <tr><td class="keys">⌘⌥ + ⏎</td><td class="desc">Maximize</td></tr>
+      <tr><td class="keys">⌘⌥ + F</td><td class="desc">Almost maximize</td></tr>
+      <tr><td class="keys">⌘⌥ + C</td><td class="desc">Center</td></tr>
+      <tr><td class="keys">⌘⌥ + Z</td><td class="desc">Restore previous frame</td></tr>
+      <tr><td class="keys">⌘⌥ + ] / [</td><td class="desc">Next / previous display</td></tr>
+    </table>
+  </div>
+
+  <h2>Details</h2>
+  <div class="grid">
+    <div class="card">
+      <h3>Quarters that tile</h3>
+      <p>Quarter tiles are half width × half height — four windows cover the screen edge to edge.
+      Re-press slides the window to the next quadrant; movement stops at the screen edge instead of wrapping.</p>
+    </div>
+    <div class="card">
+      <h3>Plays nice with stubborn apps</h3>
+      <p>Apps that enforce a minimum window size can't always shrink to a tile. The HUD names the app
+      and its minimum size, and the window is re-pinned to the correct corner instead of hanging off-screen.</p>
+    </div>
+    <div class="card">
+      <h3>Rebindable</h3>
+      <p>Click a key cap in Settings, press the new combo. Tiling gap 0–40 px,
+      Launch at Login, one-click reset. Stored in UserDefaults domain
+      <code>osx-window-manager</code>.</p>
+    </div>
+    <div class="card">
+      <h3>Native & tiny</h3>
+      <p>Swift + AppKit + the Accessibility API — the same approach as Rectangle and Magnet.
+      No Electron, no background daemons, one small binary. Requires macOS 14+.</p>
+    </div>
+  </div>
+
+  <h2>Install</h2>
+  <div class="card">
+<pre>git clone https://github.com/lotar/osx-window-manager
+cd osx-window-manager
+swift build
+./.build/debug/osx-window-manager</pre>
+    <p style="margin-top:12px">Or build the packaged menu-bar app:</p>
+<pre>./scripts/package.sh
+open dist/osx-window-manager.app</pre>
+    <p style="margin-top:12px">Grant Accessibility when prompted:
+    <strong>System Settings → Privacy &amp; Security → Accessibility</strong>.</p>
+  </div>
+
+  <footer>
+    MIT License · <a href="https://github.com/lotar/osx-window-manager">source on GitHub</a>
+  </footer>
+
+</div>
+</body>
+</html>
