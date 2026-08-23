@@ -196,11 +196,11 @@ final class ShortcutsStore {
         if let data = try? JSONEncoder().encode(shortcuts) {
             userDefaults.set(data, forKey: defaultsKey)
         }
-        NotificationCenter.default.post(name: Notification.Name("glass.shortcuts.didChange"), object: nil)
+        NotificationCenter.default.post(name: Notification.Name("osx-window-manager.shortcuts.didChange"), object: nil)
     }
 }
 
-enum GlassSettings {
+enum AppSettings {
     static let gapKey = "gap.v1"
     /// Tile gap in points, clamped 0...40. Default 0.
     static var gap: CGFloat {

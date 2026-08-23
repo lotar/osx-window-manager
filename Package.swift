@@ -2,11 +2,11 @@
 import PackageDescription
 
 let package = Package(
-    name: "Glass",
+    name: "osx-window-manager",
     platforms: [.macOS(.v14)],
     targets: [
         .executableTarget(
-            name: "Glass",
+            name: "osx-window-manager",
             path: "Sources"
         )
     ]

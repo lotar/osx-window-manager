@@ -134,7 +134,7 @@ extension WindowAction {
 
 // MARK: - Settings panel
 
-/// Frosted, sectioned glass control panel.
+/// Frosted, sectioned frosted control panel.
 final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     static let shared = SettingsWindowController()
 
@@ -153,7 +153,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "Glass — Settings"
+        window.title = "Window Manager — Settings"
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.isMovableByWindowBackground = true
@@ -202,7 +202,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         iconTile.layer?.borderWidth = 1
         iconTile.layer?.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
         let icon = NSTextField(labelWithString: "")
-        if let base = NSImage(systemSymbolName: "square.grid.2x2.fill", accessibilityDescription: "Glass")?
+        if let base = NSImage(systemSymbolName: "square.grid.2x2.fill", accessibilityDescription: "Window Manager")?
             .withSymbolConfiguration(.init(pointSize: 17, weight: .medium)) {
             let tinted = NSImage(size: base.size, flipped: false) { rect in
                 NSColor.controlAccentColor.setFill()
@@ -223,7 +223,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             icon.centerYAnchor.constraint(equalTo: iconTile.centerYAnchor),
         ])
 
-        let title = NSTextField(labelWithString: "Glass")
+        let title = NSTextField(labelWithString: "Window Manager")
         title.font = .systemFont(ofSize: 21, weight: .bold)
         title.textColor = .labelColor
         let subtitle = NSTextField(labelWithString: "Window tiling · press a key cap to rebind")
@@ -276,7 +276,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
             grid.spacing = 8
             grid.translatesAutoresizingMaskIntoConstraints = false
 
-            let card = GlassPanel(child: grid, insets: (12, 12, 12, 12))
+            let card = FrostedPanel(child: grid, insets: (12, 12, 12, 12))
             // Stretch every card to the full section width (stack alignment
             // alone is unreliable for custom views).
             card.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -294,7 +294,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         formatter.minimum = 0
         formatter.maximum = 40
         formatter.maximumFractionDigits = 0
-        let field = NSTextField(string: "\(clampedGap(GlassSettings.gap))")
+        let field = NSTextField(string: "\(clampedGap(AppSettings.gap))")
         field.alignment = .right
         field.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         field.formatter = formatter
@@ -309,7 +309,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         stepper.maxValue = Double(Self.gapRange.upperBound)
         stepper.increment = 1
         stepper.valueWraps = false
-        stepper.integerValue = clampedGap(GlassSettings.gap)
+        stepper.integerValue = clampedGap(AppSettings.gap)
         stepper.target = self
         stepper.action = #selector(gapStepperChanged)
         gapStepper = stepper
@@ -323,7 +323,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         loginToggle.state = LaunchAtLogin.isEnabled ? .on : .off
         loginToggle.target = self
         loginToggle.action = #selector(launchAtLoginToggled(_:))
-        loginToggle.toolTip = "Start Glass automatically when you sign in."
+        loginToggle.toolTip = "Start Window Manager automatically when you sign in."
         loginSwitch = loginToggle
 
         let gapGroup = NSStackView(views: [gapCaption, field, stepper, px])
@@ -335,7 +335,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         loginGroup.alignment = .centerY
         loginGroup.spacing = 7
 
-        let controls = GlassPanel(
+        let controls = FrostedPanel(
             child: hstack([gapGroup, spacer(), loginGroup], spacing: 12),
             insets: (12, 12, 10, 10)
         )
@@ -345,11 +345,11 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
         divider.boxType = .separator
         divider.translatesAutoresizingMaskIntoConstraints = false
 
-        let brand = NSTextField(labelWithString: "GLASS")
-        let bAttr = NSAttributedString(string: "GLASS", attributes: [
+        let brand = NSTextField(labelWithString: "WINDOW MANAGER")
+        let bAttr = NSAttributedString(string: "WINDOW MANAGER", attributes: [
             .font: NSFont.systemFont(ofSize: 9, weight: .bold),
             .foregroundColor: NSColor.tertiaryLabelColor,
-            .kern: 2.0,
+            .kern: 1.5,
         ])
         brand.attributedStringValue = bAttr
 
@@ -478,7 +478,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
     }
 
     private func syncGap() {
-        let value = clampedGap(GlassSettings.gap)
+        let value = clampedGap(AppSettings.gap)
         gapField?.integerValue = value
         gapStepper?.integerValue = value
     }
@@ -489,7 +489,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
     private func applyGap(_ value: Int) {
         let clamped = min(Self.gapRange.upperBound, max(Self.gapRange.lowerBound, value))
-        GlassSettings.gap = CGFloat(clamped)
+        AppSettings.gap = CGFloat(clamped)
         syncGap()
     }
 
@@ -535,7 +535,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 
     @objc private func resetTapped() {
         ShortcutsStore.shared.resetToDefaults()
-        GlassSettings.gap = 0
+        AppSettings.gap = 0
         HotKeyManager.shared.refresh()
         sync()
     }
@@ -544,7 +544,7 @@ final class SettingsWindowController: NSWindowController, NSTextFieldDelegate {
 // MARK: - Supporting views
 
 /// Rounded frosted panel that wraps a child with insets.
-final class GlassPanel: NSView {
+final class FrostedPanel: NSView {
     init(child: NSView, insets: (CGFloat, CGFloat, CGFloat, CGFloat)) {
         super.init(frame: .zero)
         wantsLayer = true

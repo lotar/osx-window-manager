@@ -2,8 +2,8 @@ import AppKit
 import Foundation
 
 /// CLI used by e2e: math dump (no AX) or one-shot tile (needs AX).
-/// `Glass --dump-layout vx vy vw vh [cx cy cw ch]` prints JSON of every action's cocoa rect.
-/// `Glass --action leftHalf` tiles the frontmost focused window and exits.
+/// `osx-window-manager --dump-layout vx vy vw vh [cx cy cw ch]` prints JSON of every action's cocoa rect.
+/// `osx-window-manager --action leftHalf` tiles the frontmost focused window and exits.
 private func runCLI() -> Bool {
     let args = CommandLine.arguments
     if let i = args.firstIndex(of: "--dump-layout"), i + 4 < args.count {
@@ -103,15 +103,15 @@ if runCLI() {
 }
 
 /// Debug bridge: lets an untrusted shell (e2e, developer) ask the trusted,
-/// running Glass to execute a geometry round-trip on the front window.
-/// Trigger:  printf topLeft > /tmp/glass-roundtrip.action
-///           notifyutil -p glass.debug.roundtrip
-/// Report:   /tmp/glass-roundtrip.log
+/// running app to execute a geometry round-trip on the front window.
+/// Trigger:  printf topLeft > /tmp/owm-roundtrip.action
+///           notifyutil -p com.lotar.osx-window-manager.roundtrip
+/// Report:   /tmp/owm-roundtrip.log
 enum RoundTripDebug {
-    static let notifyName = "glass.debug.roundtrip" as CFString
-    static let actionFile = "/tmp/glass-roundtrip.action"
-    static let pidFile = "/tmp/glass-roundtrip.pid"
-    static let reportFile = "/tmp/glass-roundtrip.log"
+    static let notifyName = "com.lotar.osx-window-manager.roundtrip" as CFString
+    static let actionFile = "/tmp/owm-roundtrip.action"
+    static let pidFile = "/tmp/owm-roundtrip.pid"
+    static let reportFile = "/tmp/owm-roundtrip.log"
 
     static func install() {
         CFNotificationCenterAddObserver(
@@ -130,7 +130,7 @@ enum RoundTripDebug {
         let action = WindowAction(rawValue: requested) ?? .topHalf
         let pid = (try? String(contentsOfFile: pidFile, encoding: .utf8))
             .flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
-        let seq = (try? String(contentsOfFile: "/tmp/glass-roundtrip.seq", encoding: .utf8))?
+        let seq = (try? String(contentsOfFile: "/tmp/owm-roundtrip.seq", encoding: .utf8))?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? "0"
         let report = WindowEngine.shared.debugRoundTrip(action: action, targetPID: pid) ?? "no-front-window"
         try? "seq=\(seq) action=\(requested)\n\(report)".write(toFile: reportFile, atomically: true, encoding: .utf8)
@@ -159,7 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(shortcutsDidChange),
-            name: Notification.Name("glass.shortcuts.didChange"),
+            name: Notification.Name("osx-window-manager.shortcuts.didChange"),
             object: nil
         )
         NotificationCenter.default.addObserver(
@@ -173,8 +173,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = item.button {
-            button.image = NSImage(systemSymbolName: "macwindow.on.rectangle", accessibilityDescription: "Glass")
-            button.toolTip = "Glass — window manager"
+            button.image = NSImage(systemSymbolName: "macwindow.on.rectangle", accessibilityDescription: "Window Manager")
+            button.toolTip = "Window Manager"
         }
         self.statusItem = item
         rebuildStatusMenu()
@@ -210,7 +210,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(launchItem)
 
         menu.addItem(.separator())
-        menu.addItem(withTitle: "Quit Glass", action: #selector(quit), keyEquivalent: "q").target = self
+        menu.addItem(withTitle: "Quit Window Manager", action: #selector(quit), keyEquivalent: "q").target = self
         statusItem?.menu = menu
     }
 

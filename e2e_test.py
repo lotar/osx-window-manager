@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""E2E test for the Glass menu-bar window manager.
+"""E2E test for the osx-window-manager menu-bar app.
 
 Covers:
   1. `swift build` (debug + release) succeeds
   2. App launches as a menu-bar accessory and stays alive
-  3. shortcuts.v1 in UserDefaults domain Glass (incomplete/fresh → built-in defaults, not a fail)
+  3. shortcuts.v1 in UserDefaults domain osx-window-manager (incomplete/fresh → built-in defaults, not a fail)
   4. Each WindowAction hotkey is posted (CGEvent) and geometry is checked
      against the frontmost Finder window (AX / AppKit visibleFrame)
   5. Status-bar menu → Settings… → Reset to Defaults → Quit via ⌘Q
@@ -21,9 +21,9 @@ import sys
 import time
 
 PROJ = os.path.dirname(os.path.abspath(__file__))
-BIN = os.path.join(PROJ, ".build", "debug", "Glass")
-PLIST = os.path.expanduser("~/Library/Preferences/Glass.plist")
-DOMAIN = "Glass"
+BIN = os.path.join(PROJ, ".build", "debug", "osx-window-manager")
+PLIST = os.path.expanduser("~/Library/Preferences/osx-window-manager.plist")
+DOMAIN = "osx-window-manager"
 SHORTCUTS_KEY = "shortcuts.v1"
 GAP_KEY = "gap.v1"
 
@@ -296,14 +296,14 @@ def ax_set(x, y, w, h):
     return r.returncode == 0 and "0 0" in r.stdout
 
 
-def glass_pid():
-    r = sh("pgrep -x Glass")
+def manager_pid():
+    r = sh("pgrep -x osx-window-manager")
     pids = [p for p in r.stdout.split() if p]
     return int(pids[0]) if pids else None
 
 
-def kill_glass():
-    for p in (sh("pgrep -x Glass").stdout.split()):
+def kill_manager():
+    for p in (sh("pgrep -x osx-window-manager").stdout.split()):
         try:
             os.kill(int(p), signal.SIGKILL)
         except OSError:
@@ -414,7 +414,7 @@ def parse_shortcuts_blob(blob):
     return out
 
 
-def load_glass_prefs():
+def load_app_prefs():
     r = subprocess.run(["defaults", "export", DOMAIN, "-"], capture_output=True, timeout=10)
     if r.returncode == 0 and r.stdout:
         try:
@@ -447,8 +447,8 @@ def decode_json_pref(raw):
 
 
 def read_shortcuts():
-    """Decode shortcuts.v1 from domain Glass → {action: (keyCode, modifiersRaw)}."""
-    prefs = load_glass_prefs()
+    """Decode shortcuts.v1 from domain osx-window-manager → {action: (keyCode, modifiersRaw)}."""
+    prefs = load_app_prefs()
     blob = decode_json_pref(prefs.get(SHORTCUTS_KEY) if prefs else None)
     err = None
     if blob is None:
@@ -475,7 +475,7 @@ def read_shortcuts():
 
 
 def read_gap():
-    prefs = load_glass_prefs() or {}
+    prefs = load_app_prefs() or {}
     raw = prefs.get(GAP_KEY)
     if raw is None:
         return 0.0
@@ -662,7 +662,7 @@ def expected_cocoa(action, vis, current, gap=0.0):
 
 
 def run_dump_layout():
-    """AX-free: Glass --dump-layout must match WindowEngine.layoutRect contract."""
+    """AX-free: osx-window-manager --dump-layout must match WindowEngine.layoutRect contract."""
     screens = appkit_screens()
     vis = screens[0]["vis"]
     current = (vis[0] + 120, vis[1] + 80, 640.0, 400.0)
@@ -697,15 +697,15 @@ def run_dump_layout():
     return True
 
 
-def glass_trusted():
+def app_trusted():
     r = sh(f"{BIN} --trusted 2>/dev/null", timeout=10)
     return r.returncode == 0 and r.stdout.strip() == "1"
 
 
 def run_live_actions():
-    """Tile via Glass --action (same AX identity as the app) + CGWindowList measure."""
-    if not glass_trusted():
-        record("live-actions", SKIP, "Glass binary not Accessibility-trusted")
+    """Tile via osx-window-manager --action (same AX identity as the app) + CGWindowList measure."""
+    if not app_trusted():
+        record("live-actions", SKIP, "app binary not Accessibility-trusted")
         return
     sh(f"open {PROJ}")
     time.sleep(1.0)
@@ -758,7 +758,7 @@ def merge_shortcuts(persisted):
 def click_status_item():
     for mb in (2, 1):
         r = osa(
-            'tell application "System Events" to tell process "Glass" '
+            'tell application "System Events" to tell process "osx-window-manager" '
             f'to click menu bar item 1 of menu bar {mb}'
         )
         if r is not None:
@@ -768,7 +768,7 @@ def click_status_item():
 
 def click_menu_item(title, menu_bar):
     return osa(
-        'tell application "System Events" to tell process "Glass" '
+        'tell application "System Events" to tell process "osx-window-manager" '
         f'to click menu item "{title}" of menu 1 of menu bar item 1 of menu bar {menu_bar}'
     )
 
@@ -776,7 +776,7 @@ def click_menu_item(title, menu_bar):
 def click_reset_button():
     for title in ("Reset to Defaults", "Reset to defaults"):
         r = osa(
-            'tell application "System Events" to tell process "Glass" '
+            'tell application "System Events" to tell process "osx-window-manager" '
             f'to click button "{title}" of window 1'
         )
         if r is not None:
@@ -802,7 +802,7 @@ def main():
     if not run_dump_layout():
         return finish()
 
-    kill_glass()
+    kill_manager()
     subprocess.Popen(
         [BIN],
         stdout=subprocess.DEVNULL,
@@ -810,11 +810,11 @@ def main():
         start_new_session=True,
     )
     time.sleep(2.5)
-    pid = glass_pid()
+    pid = manager_pid()
     if pid:
         record("launch", PASS, f"pid {pid}")
         time.sleep(2.0)
-        if glass_pid() == pid:
+        if manager_pid() == pid:
             record("stays-alive", PASS)
         else:
             record("stays-alive", FAIL, "exited after launch")
@@ -849,7 +849,7 @@ def main():
     sh(f"open {PROJ}")
     time.sleep(1.0)
     start_bounds = measure_window()
-    if not glass_trusted():
+    if not app_trusted():
         r = sh(f"{BIN} --action maximize", timeout=15)
         record(
             "action-trust-gate",
@@ -936,12 +936,12 @@ def run_geometry(sc, sax, n_screens):
 
 
 def run_menu_and_quit(start_bounds):
-    if glass_pid() is None:
-        record("menu-opens", FAIL, "Glass not running")
+    if manager_pid() is None:
+        record("menu-opens", FAIL, "osx-window-manager not running")
         return
     if osa('tell application "System Events" to get name of front process', timeout=6) is None:
         record("menu-opens", SKIP, "System Events unresponsive (likely needs Accessibility grant)")
-        kill_glass()
+        kill_manager()
         record("quit", SKIP, "Automation not granted; killed in cleanup")
         return
 
@@ -952,7 +952,7 @@ def run_menu_and_quit(start_bounds):
         f"clicked status item (menu bar {mb})" if mb is not None else "no menu bar item",
     )
     if mb is None:
-        kill_glass()
+        kill_manager()
         record("quit", SKIP, "could not open menu; killed in cleanup")
         return
 
@@ -961,7 +961,7 @@ def run_menu_and_quit(start_bounds):
     if r is None:
         r = click_menu_item("Settings...", mb)
     time.sleep(1.0)
-    wins = osa('tell application "System Events" to tell process "Glass" to count windows')
+    wins = osa('tell application "System Events" to tell process "osx-window-manager" to count windows')
     n = int(wins) if wins and wins.isdigit() else 0
     record("settings-window", PASS if n >= 1 else FAIL, f"{n} window(s) after Settings…")
     if n >= 1:
@@ -974,12 +974,12 @@ def run_menu_and_quit(start_bounds):
         ax_set(*start_bounds)
         time.sleep(0.3)
 
-    osa('tell application "System Events" to tell process "Glass" to keystroke "q" using {command down}')
+    osa('tell application "System Events" to tell process "osx-window-manager" to keystroke "q" using {command down}')
     time.sleep(1.0)
-    if glass_pid() is None:
+    if manager_pid() is None:
         record("quit", PASS, "quit via cmd+q")
     else:
-        kill_glass()
+        kill_manager()
         record("quit", SKIP, "cmd+q did not exit; killed in cleanup")
 
 

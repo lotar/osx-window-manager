@@ -19,7 +19,7 @@ final class WindowEngine {
         var errorDescription: String? {
             switch self {
             case .notTrusted:
-                return "Glass needs Accessibility access to move windows."
+                return "osx-window-manager needs Accessibility access to move windows."
             case .noFrontWindow:
                 return "No movable window found."
             }
@@ -37,7 +37,7 @@ final class WindowEngine {
     private static func log(_ line: String) {
         let s = "\(ISO8601DateFormatter().string(from: Date())) \(line)\n"
         guard let data = s.data(using: .utf8) else { return }
-        let url = URL(fileURLWithPath: "/tmp/glass.log")
+        let url = URL(fileURLWithPath: "/tmp/owm.log")
         if FileManager.default.fileExists(atPath: url.path) {
             if let h = try? FileHandle(forWritingTo: url) {
                 defer { try? h.close() }
@@ -78,7 +78,7 @@ final class WindowEngine {
 
     // MARK: - Animation (configurable; 0.4s default, 0 = instant)
 
-    static let animationDurationKey = "glass.animation.v1"
+    static let animationDurationKey = "osx-window-manager.animation.v1"
 
     /// Duration in seconds for animated window moves (persisted in UserDefaults).
     static var animationDuration: Double {
@@ -146,7 +146,7 @@ final class WindowEngine {
 
     func perform(_ action: WindowAction) {
         // Do not gate on isTrusted(): AXIsProcessTrusted() is false for a stale
-        // TCC row (old ad-hoc Glass) even when this .app is allowed. Prompting
+        // TCC row (old ad-hoc build) even when this .app is allowed. Prompting
         // on every hotkey is what the user saw. Try the move; prompt at most once
         // if AX cannot see a window.
         moveGeneration += 1
@@ -469,10 +469,10 @@ final class WindowEngine {
 
     // MARK: - Layout
 
-    /// Cocoa-space tile for `visible` (already the screen's visibleFrame) and `GlassSettings.gap`.
+    /// Cocoa-space tile for `visible` (already the screen's visibleFrame) and `AppSettings.gap`.
     /// Used by `perform` and by `--dump-layout` so e2e asserts the same math.
     func layoutRect(for action: WindowAction, current: CGRect, visible: CGRect, screen: NSScreen? = nil) -> CGRect {
-        let area = visible.insetBy(dx: GlassSettings.gap, dy: GlassSettings.gap)
+        let area = visible.insetBy(dx: AppSettings.gap, dy: AppSettings.gap)
         let w = area.width
         let h = area.height
         let halfW = w / 2

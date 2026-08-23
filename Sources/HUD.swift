@@ -2,7 +2,7 @@ import AppKit
 
 /// Transient on-screen toast confirming which tile fired. Also surfaces
 /// app-min-size warnings ("can't go smaller than this") so a clamped tile
-/// reads as an app limitation, not a Glass bug. Non-activating: never steals
+/// reads as an app limitation, not an app limitation. Non-activating: never steals
 /// focus, so the next hotkey still targets the same frontmost window.
 enum HUD {
     private static var panel: NSPanel?

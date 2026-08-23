@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>Glass</string>
+	<string>osx-window-manager</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.lotar.glass</string>
+	<string>com.lotar.osx-window-manager</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleExecutable</key>
-	<string>Glass</string>
+	<string>osx-window-manager</string>
 	<key>CFBundleShortVersionString</key>
 	<string>1.0</string>
 	<key>LSUIElement</key>
@@ -19,6 +19,6 @@
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>NSAccessibilityUsageDescription</key>
-	<string>Glass needs Accessibility to move and resize windows.</string>
+	<string>osx-window-manager needs Accessibility to move and resize windows.</string>
 </dict>
 </plist>

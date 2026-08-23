@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Live movement matrix for Glass, driven through the trusted running app
+"""Live movement matrix for osx-window-manager, driven through the trusted running app
 (Darwin-notification bridge) with visual validation.
 
 For each step: position the frontmost window via one action, then apply a
 slide/absolute action. After each move we parse the AX-read-back frame from
-/tmp/glass-roundtrip.log and render an exact-scale visualization:
+/tmp/owm-roundtrip.log and render an exact-scale visualization:
   - gray area = visible frame (menu bar + dock respected)
   - blue outline = expected tile
   - green fill = actual window frame reported by the app
@@ -20,8 +20,8 @@ import time
 from PIL import Image, ImageDraw
 
 PROJ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LOG = "/tmp/glass-roundtrip.log"
-ACTION_FILE = "/tmp/glass-roundtrip.action"
+LOG = "/tmp/owm-roundtrip.log"
+ACTION_FILE = "/tmp/owm-roundtrip.action"
 OUT_DIR = "/tmp/matrix"
 
 VX, VY, VW, VH = 0.0, 90.0, 1728.0, 994.0  # visible frame (cocoa)
@@ -42,10 +42,10 @@ def trigger(action):
     seq = next(SEQ)
     with open(ACTION_FILE, "w") as f:
         f.write(action)
-    with open("/tmp/glass-roundtrip.seq", "w") as f:
+    with open("/tmp/owm-roundtrip.seq", "w") as f:
         f.write(str(seq))
     if TEST_PID:
-        with open("/tmp/glass-roundtrip.pid", "w") as f:
+        with open("/tmp/owm-roundtrip.pid", "w") as f:
             f.write(str(TEST_PID))
     try:
         os.remove(LOG)
@@ -54,7 +54,7 @@ def trigger(action):
     # Post, then poll for the matching report (re-post once if the Darwin
     # notification was lost/coalesced).
     for attempt in range(2):
-        subprocess.run(["notifyutil", "-p", "glass.debug.roundtrip"])
+        subprocess.run(["notifyutil", "-p", "com.lotar.osx-window-manager.roundtrip"])
         for _ in range(30):
             time.sleep(0.2)
             if os.path.exists(LOG):
@@ -142,7 +142,7 @@ def frames_close(a, b, tol=TOL):
 def main():
     global TEST_PID
     os.makedirs(OUT_DIR, exist_ok=True)
-    pid_out = subprocess.run(["pgrep", "-x", "GlassTestWindow"], capture_output=True, text=True).stdout.strip()
+    pid_out = subprocess.run(["pgrep", "-x", "OwmTestWindow"], capture_output=True, text=True).stdout.strip()
     if not pid_out:
         print("test window not running"); raise SystemExit(1)
     TEST_PID = int(pid_out.splitlines()[0])
@@ -150,7 +150,7 @@ def main():
     probe = trigger("maximize")
     if probe is None:
         print("bridge cannot target test window"); raise SystemExit(1)
-    print(f"targeting GlassTestWindow pid={TEST_PID}")
+    print(f"targeting OwmTestWindow pid={TEST_PID}")
     steps = [
         # (positioning action(s) first, then the action under test, expected tile name)
         ("maximize -> shift-RIGHT", ["maximize", "topRight"], "topRight"),

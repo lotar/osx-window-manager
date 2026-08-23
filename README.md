@@ -1,99 +1,67 @@
-# Glass — menu-bar macOS window tiler
+# osx-window-manager
 
-Menu-bar-only (no Dock icon) window manager: global shortcuts tile the
-frontmost window, a glass settings window rebinds them, and a gap slider
-plus Launch at Login live in the same UI.
+Menu-bar macOS window manager: global shortcuts tile the frontmost window.
 
-macOS 14+, Apple silicon.
+## Requirements
 
-## Build & run
+- macOS 14+
+- Apple Silicon
+- Accessibility permission (System Settings → Privacy & Security → Accessibility)
+
+## Build & Install
 
 ```bash
 swift build
-./.build/debug/Glass
+./.build/debug/osx-window-manager
 ```
 
-Release:
+Release binary:
 
 ```bash
 swift build -c release
-./.build/release/Glass
 ```
 
-The debug/release binaries are SwiftPM executables (prefs domain `Glass`).
-For a real `.app` (Launch at Login, `LSUIElement` in Info.plist):
+Packaged app (menu-bar app, Launch at Login support):
 
 ```bash
 ./scripts/package.sh
-# prints: .../dist/Glass.app
-open dist/Glass.app
+open dist/osx-window-manager.app
 ```
-
-## Accessibility
-
-Glass moves windows with the `AXUIElement` API (same as Rectangle / Magnet).
-On first launch, grant **Accessibility** in System Settings → Privacy &
-Security → Accessibility, then relaunch.
 
 ## Default shortcuts
 
-All bindings use virtual keycodes + `NSEvent` modifier raw values, registered
-with Carbon `RegisterEventHotKey` (not a CGEvent tap). Rebind anything in
-Settings.
-
-| Action | Default |
+| Keys | Action |
 |---|---|
-| Left half | ⌘⌥← |
-| Right half | ⌘⌥→ |
-| Top half | ⌘⌥↑ |
-| Bottom half | ⌘⌥↓ |
-| Top-left quarter | ⌘⌥⇧← |
-| Top-right quarter | ⌘⌥⇧→ |
-| Bottom-left quarter | ⌘⌥⇧↓ |
-| Bottom-right quarter | ⌘⌥⇧↑ |
-| Left third | ⌘⌥1 |
-| Center third | ⌘⌥2 |
-| Right third | ⌘⌥3 |
-| Left two-thirds | ⌘⌥E |
-| Right two-thirds | ⌘⌥T |
-| Maximize | ⌘⌥⏎ |
-| Almost maximize | ⌘⌥F |
-| Center | ⌘⌥C |
-| Restore | ⌘⌥Z |
-| Previous display | ⌘⌥[ |
-| Next display | ⌘⌥] |
+| ⌘⌥+← / → / ↑ / ↓ | Left / right / top / bottom half |
+| ⌘⌥+1 / 2 / 3 | Left / center / right third |
+| ⌘⌥+E / R | Left / right two-thirds |
+| ⌘⌥+Return | Maximize |
+| ⌘⌥+F | Almost maximize |
+| ⌘⌥+C | Center |
+| ⌘⌥+Z | Restore previous frame |
+| ⌘⌥+] / [ | Next / previous display |
+| ⌘⌥⇧+← / → / ↑ / ↓ | Slide quarter left / right / down / up |
 
-Tiles use `NSScreen.visibleFrame` (menu bar and Dock stay uncovered). Gap `0`
-by default; Restore returns the window to the pre-tile bounds.
+Quarter tiles are half width × half height, so four windows tile the screen.
+Slides are relative to the window's current quadrant and clamp at screen edges.
 
-## Settings
+## Rebinding & settings
 
-Menu-bar icon → **Settings…**
+Open Settings from the menu-bar icon. Click a key cap, press the new combo,
+Esc cancels. Also in Settings: tiling gap (0–40 px), Launch at Login,
+Reset to Defaults.
 
-- **Rebind** — click a field, press the new combo. Esc cancels. Combos with
-  no modifier are rejected so normal typing is never hijacked.
-- **Gap** — inner inset between tiles (`gap.v1`, 0…40 pt).
-- **Launch at Login** — `SMAppService` (works from the packaged `.app`).
-- **Reset to Defaults** — writes the table above back to `shortcuts.v1`.
+## Configuration storage
 
-Shortcuts persist in UserDefaults domain `Glass`, key `shortcuts.v1`
-(JSONEncoder of `[WindowAction: Shortcut]`). Optional gap: `gap.v1`.
+UserDefaults domain `osx-window-manager`.
 
-## How it works
+## Troubleshooting
 
-- **Global hotkeys** — Carbon `RegisterEventHotKey`.
-- **Window control** — `AXUIElement` on the frontmost app's focused window.
-- **Menu-bar app** — `NSApplication.setActivationPolicy(.accessory)` and
-  `LSUIElement` in the packaged Info.plist (`com.lotar.glass`).
-- **Settings UI** — `NSVisualEffectView` (`underWindowBackground`) +
-  translucent rounded cards.
+- No windows move: grant Accessibility, then relaunch.
+- Diagnostics: `/tmp/owm.log`.
+- Some apps enforce minimum window sizes larger than a tile; the HUD warns
+  with the app's minimum size and the window is pinned to the nearest corner.
 
-## Test
+## License
 
-```bash
-python3 e2e_test.py
-```
-
-Asserts debug+release build, `--dump-layout` math for all 19 actions, launch,
-and the AX trust gate. Live window moves and menu clicks SKIP unless this
-binary and Automation are granted in System Settings.
+MIT — see [LICENSE](LICENSE).

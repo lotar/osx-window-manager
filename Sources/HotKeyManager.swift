@@ -14,7 +14,7 @@ final class HotKeyManager {
     private var handler: Handler?
     private var eventHandler: EventHandlerRef?
 
-    private let sigBase: FourCharCode = 0x474C_53_4D // 'GLSM'
+    private let sigBase: FourCharCode = 0x4F_57_4D_47 // 'OWMG'
 
     func install(handler: @escaping Handler) {
         self.handler = handler
@@ -67,7 +67,7 @@ final class HotKeyManager {
         )
         guard status == noErr, let action = handlers[hotKeyID.id] else { return }
         // Log the modifiers AS DELIVERED so swallowed/stripped modifiers
-        // (e.g. by keyboard utilities) are visible in /tmp/glass.log.
+        // (e.g. by keyboard utilities) are visible in /tmp/owm.log.
         var mods = UInt32(0)
         _ = GetEventParameter(
             event,
@@ -91,8 +91,8 @@ final class HotKeyManager {
 // C-function callback bridge for the Carbon event target.
 private var gHotKeyManager = HotKeyManager.shared
 
-@_cdecl("glassHotKeyEventHandler")
-func glassHotKeyEventHandler(_ callBack: EventHandlerCallRef?, _ event: EventRef?, _ userData: UnsafeMutableRawPointer?) -> OSStatus {
+@_cdecl("osxWindowManagerHotKeyEventHandler")
+func osxWindowManagerHotKeyEventHandler(_ callBack: EventHandlerCallRef?, _ event: EventRef?, _ userData: UnsafeMutableRawPointer?) -> OSStatus {
     gHotKeyManager.dispatch(event)
     return noErr
 }
@@ -108,7 +108,7 @@ extension HotKeyManager {
         // Dispatcher target is what Carbon hotkeys actually deliver to.
         let status = InstallEventHandler(
             GetEventDispatcherTarget(),
-            glassHotKeyEventHandler,
+            osxWindowManagerHotKeyEventHandler,
             1,
             &spec,
             nil,
@@ -117,7 +117,7 @@ extension HotKeyManager {
         if status != noErr {
             _ = InstallEventHandler(
                 GetApplicationEventTarget(),
-                glassHotKeyEventHandler,
+                osxWindowManagerHotKeyEventHandler,
                 1,
                 &spec,
                 nil,

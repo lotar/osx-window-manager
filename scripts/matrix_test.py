@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Full movement-matrix test for Glass, driven through the real Swift logic
-via `Glass --dump-resolve` (resolvedAction + layoutRect + pinnedRect).
+"""Full movement-matrix test for osx-window-manager, driven through the real Swift logic
+via `osx-window-manager --dump-resolve` (resolvedAction + layoutRect + pinnedRect).
 
 Asserts, for every starting position x every action:
   1. resolved target lies fully inside the visible frame (bounded)
@@ -16,7 +16,7 @@ import subprocess
 import sys
 
 PROJ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BIN = os.path.join(PROJ, ".build", "debug", "Glass")
+BIN = os.path.join(PROJ, ".build", "debug", "osx-window-manager")
 TOL = 0.6
 
 # Visible frame on the test machine (menu bar top, Dock bottom).
