@@ -197,15 +197,33 @@ final class WindowEngine {
                 )
             }
             var size = current.size
+            // Writes `wanted` and returns the size the app actually accepted.
+            // Electron apps (WhatsApp) often DROP a resize write that lands
+            // while they are still processing the previous one, so a single
+            // write is not trustworthy - retry until the frame reflects the
+            // write, the app clamps to its own minimum (responded, won't go
+            // further), or attempts run out.
+            func acceptedSize(_ wanted: CGSize) -> CGSize {
+                let before = cocoaFrame(of: window) ?? CGRect(origin: .zero, size: wanted)
+                for _ in 0..<4 {
+                    moveImmediate(window, to: CGRect(origin: probeOrigin(wanted), size: wanted))
+                    if let p = settledFrame(of: window, tries: 4, interval: 0.05) {
+                        if abs(p.size.width - wanted.width) <= 0.5 && abs(p.size.height - wanted.height) <= 0.5 {
+                            return p.size
+                        }
+                        if p.size != before.size {
+                            return p.size // responded but clamped to its own minimum
+                        }
+                    }
+                    Thread.sleep(forTimeInterval: 0.12)
+                }
+                return (settledFrame(of: window) ?? before).size
+            }
             if target.height < current.height - 0.5 {
-                moveImmediate(window, to: CGRect(origin: probeOrigin(CGSize(width: current.width, height: target.height)),
-                                                 size: CGSize(width: current.width, height: target.height)))
-                if let p = settledFrame(of: window) { size.height = p.size.height }
+                size = acceptedSize(CGSize(width: current.width, height: target.height))
             }
             if target.width < current.width - 0.5 {
-                moveImmediate(window, to: CGRect(origin: probeOrigin(CGSize(width: target.width, height: size.height)),
-                                                 size: CGSize(width: target.width, height: size.height)))
-                if let p = settledFrame(of: window) { size.width = p.size.width }
+                size = acceptedSize(CGSize(width: target.width, height: size.height))
             }
             if abs(size.width - target.width) > 0.5 || abs(size.height - target.height) > 0.5 {
                 Self.log("perform(\(action.rawValue)) probe clamp \(target.size) -> \(size) app=\(appName)")
@@ -400,7 +418,7 @@ final class WindowEngine {
     }
 
     /// Waits for the app's frame to stop changing (min-size clamps can land
-    /// late), then re-pins if the app returned more size than requested.
+    /// late), re-pins clamped results, and re-issues dropped grow writes.
     func settleAndRepin(_ window: AXUIElement, target: CGRect, action: WindowAction) {
         var last = cocoaFrame(of: window)
         for _ in 0..<5 {
@@ -410,6 +428,20 @@ final class WindowEngine {
             last = now
         }
         rePinClamped(window, target: target, action: action)
+        // Grows occasionally get ignored (app busy right after launch or a
+        // burst of writes): if the window is still smaller than the target,
+        // re-issue the final frame.
+        if let a = cocoaFrame(of: window),
+           a.width < target.width - 0.5 || a.height < target.height - 0.5 {
+            for _ in 0..<2 {
+                moveImmediate(window, to: target)
+                Thread.sleep(forTimeInterval: 0.15)
+                if let p = cocoaFrame(of: window),
+                   p.width >= target.width - 0.5 && p.height >= target.height - 0.5 {
+                    break
+                }
+            }
+        }
     }
 
     private func screen(for cocoaRect: CGRect) -> NSScreen? {
