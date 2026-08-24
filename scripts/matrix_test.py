@@ -119,8 +119,8 @@ def main():
         for arrow_action in QUARTERS:
             r = table[arrow_action]
             # expected quadrant from window center
-            c = 0 if mid_x_of_start <= VX + VW / 2 else 1
-            rw = 0 if mid_y_of_start <= VY + VH / 2 else 1
+            c = 0 if abs(mid_x_of_start - (VX + VW / 2)) <= 2 else (0 if mid_x_of_start < VX + VW / 2 else 1)
+            rw = 1 if abs(mid_y_of_start - (VY + VH / 2)) <= 2 else (0 if mid_y_of_start < VY + VH / 2 else 1)
             d = {"topLeft": (-1, 0), "topRight": (1, 0), "bottomLeft": (0, -1), "bottomRight": (0, 1)}[arrow_action]
             ec = min(max(c + d[0], 0), 1)
             er = min(max(rw + d[1], 0), 1)

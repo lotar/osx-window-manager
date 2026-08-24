@@ -238,8 +238,22 @@ final class WindowEngine {
         case .bottomLeft: (dCol, dRow) = (0, -1) // ↓
         default: (dCol, dRow) = (0, 1)           // ↑
         }
-        let col = current.midX <= visible.midX ? 0 : 1
-        let row = current.midY <= visible.midY ? 0 : 1 // cocoa Y-up: 0 = bottom
+        // Deterministic tie-breaks for windows SPANNING the center (halves,
+        // maximized): a ±1pt rounding artifact of the tiled app must not flip
+        // the target quadrant. Horizontal slides land in the top row, vertical
+        // slides in the left column.
+        let col: Int
+        if abs(current.midX - visible.midX) <= 2 {
+            col = 0
+        } else {
+            col = current.midX < visible.midX ? 0 : 1
+        }
+        let row: Int
+        if abs(current.midY - visible.midY) <= 2 {
+            row = 1 // cocoa Y-up: spanning height counts as top row
+        } else {
+            row = current.midY < visible.midY ? 0 : 1
+        }
         let nextCol = min(max(col + dCol, 0), 1)
         let nextRow = min(max(row + dRow, 0), 1)
         switch (nextCol, nextRow) {
