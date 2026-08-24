@@ -82,6 +82,9 @@ Test harnesses: `python3 e2e_test.py` (full suite),
 - Diagnostics: `/tmp/owm.log`.
 - Some apps enforce minimum window sizes larger than a tile; the HUD warns
   with the app's minimum size and the window is pinned to the nearest corner.
+  Tiling animates to the ideal tile first and then corrects, because Electron
+  apps (Slack, WhatsApp, …) silently drop direct resize writes but accept
+  animated ones — one press always produces the best size the app allows.
 
 ## License
 
