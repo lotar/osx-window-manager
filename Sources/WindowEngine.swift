@@ -183,22 +183,32 @@ final class WindowEngine {
         // effectively never clamped, so skip the latency there.
         var clampedTo: CGSize?
         if target.width < current.width - 0.5 || target.height < current.height - 0.5 {
-            moveImmediate(window, to: CGRect(origin: current.origin, size: target.size))
-            if let probed = settledFrame(of: window),
-               abs(probed.size.width - target.width) > 0.5 || abs(probed.size.height - target.height) > 0.5 {
-                Self.log("perform(\(action.rawValue)) probe clamp \(target.size) -> \(probed.size) app=\(appName)")
-                var size = probed.size
-                // Some apps shrink BOTH dimensions when either is below their
-                // minimum (e.g. Slack: ask 1728x497, get 868x587). Retry with
-                // the requested width and the height they did accept — often
-                // the width was never actually rejected.
-                if size.width < target.width - 0.5 && size.height >= target.height - 0.5 {
-                    moveImmediate(window, to: CGRect(origin: current.origin, size: CGSize(width: target.width, height: max(size.height, target.height))))
-                    if let retry = settledFrame(of: window), retry.width >= target.width - 0.5 {
-                        Self.log("perform(\(action.rawValue)) probe width recovery \(size) -> \(retry.size)")
-                        size = retry.size
-                    }
-                }
+            // Probe axes INDEPENDENTLY. Asking for the full target when one
+            // axis is below the app's minimum makes some apps return garbage
+            // on BOTH axes (WhatsApp: ask 1728x497, get 1701x600, and the
+            // width creeps toward 1728 only over repeated presses). Height
+            // first (keeping current width), then width at the accepted
+            // height. Probe origins are clamped so test writes stay on-screen.
+            func probeOrigin(_ size: CGSize) -> CGPoint {
+                let vf = screen.visibleFrame
+                return CGPoint(
+                    x: min(max(current.origin.x, vf.minX), vf.maxX - size.width),
+                    y: min(max(current.origin.y, vf.minY), vf.maxY - size.height)
+                )
+            }
+            var size = current.size
+            if target.height < current.height - 0.5 {
+                moveImmediate(window, to: CGRect(origin: probeOrigin(CGSize(width: current.width, height: target.height)),
+                                                 size: CGSize(width: current.width, height: target.height)))
+                if let p = settledFrame(of: window) { size.height = p.size.height }
+            }
+            if target.width < current.width - 0.5 {
+                moveImmediate(window, to: CGRect(origin: probeOrigin(CGSize(width: target.width, height: size.height)),
+                                                 size: CGSize(width: target.width, height: size.height)))
+                if let p = settledFrame(of: window) { size.width = p.size.width }
+            }
+            if abs(size.width - target.width) > 0.5 || abs(size.height - target.height) > 0.5 {
+                Self.log("perform(\(action.rawValue)) probe clamp \(target.size) -> \(size) app=\(appName)")
                 clampedTo = size
                 target = Self.pinnedRect(target: target, actualSize: size, action: resolved)
             }
