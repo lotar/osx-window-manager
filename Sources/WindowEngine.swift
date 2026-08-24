@@ -144,7 +144,8 @@ final class WindowEngine {
         RunLoop.main.add(timer, forMode: .common)
     }
 
-    func perform(_ action: WindowAction) {
+    @discardableResult
+    func perform(_ action: WindowAction, targetPID: Int32? = nil) -> WindowAction? {
         // Do not gate on isTrusted(): AXIsProcessTrusted() is false for a stale
         // TCC row (old ad-hoc build) even when this .app is allowed. Prompting
         // on every hotkey is what the user saw. Try the move; prompt at most once
@@ -153,10 +154,10 @@ final class WindowEngine {
         let generation = moveGeneration
         let trusted = Self.isTrusted()
         Self.log("perform(\(action.rawValue)) animDur=\(String(format: "%.2f", Self.animationDuration))s trusted=\(trusted)")
-        guard let window = frontWindow() else {
+        guard let window = Self.window(for: targetPID) ?? frontWindow() else {
             Self.log("perform(\(action.rawValue)) no front window trusted=\(trusted)")
             Self.requestTrustIfNeeded()
-            return
+            return nil
         }
         if !trusted {
             Self.log("perform(\(action.rawValue)) AX check false; trying anyway")
@@ -164,106 +165,52 @@ final class WindowEngine {
 
         guard let current = cocoaFrame(of: window) else {
             Self.requestTrustIfNeeded()
-            return
+            return nil
         }
         if action == .restore {
             if let saved = lastCocoaFrame {
                 moveAnimated(window, from: current, to: saved)
             }
-            return
+            return nil
         }
-        guard let screen = screen(for: current) else { return }
+        guard let screen = screen(for: current) else { return nil }
         let resolved = resolvedAction(for: action, current: current, visible: screen.visibleFrame)
-        var target = targetRect(for: resolved, current: current, screen: screen)
+        let ideal = targetRect(for: resolved, current: current, screen: screen)
         let appName = NSWorkspace.shared.frontmostApplication?.localizedName ?? "?"
 
-        // Probe the size the app will actually accept (many enforce a minimum
-        // window size) BEFORE animating, and pin the animation target to the
-        // achievable on-screen rect. Only needed when shrinking; grows are
-        // effectively never clamped, so skip the latency there.
-        var clampedTo: CGSize?
-        if target.width < current.width - 0.5 || target.height < current.height - 0.5 {
-            // Probe axes INDEPENDENTLY. Asking for the full target when one
-            // axis is below the app's minimum makes some apps return garbage
-            // on BOTH axes (WhatsApp: ask 1728x497, get 1701x600, and the
-            // width creeps toward 1728 only over repeated presses). Height
-            // first (keeping current width), then width at the accepted
-            // height. Probe origins are clamped so test writes stay on-screen.
-            func probeOrigin(_ size: CGSize) -> CGPoint {
-                let vf = screen.visibleFrame
-                return CGPoint(
-                    x: min(max(current.origin.x, vf.minX), vf.maxX - size.width),
-                    y: min(max(current.origin.y, vf.minY), vf.maxY - size.height)
-                )
-            }
-            var size = current.size
-            // Writes `wanted` and returns the size the app actually accepted.
-            // Electron apps (WhatsApp) often DROP a resize write that lands
-            // while they are still processing the previous one, so a single
-            // write is not trustworthy: use the Electron-safe
-            // size -> position -> size pattern and retry until the AXIS WE
-            // ASKED TO CHANGE responds (an unrelated-axis change is not a
-            // response - that is exactly the dropped-write signature), the
-            // app clamps on that axis, or attempts run out.
-            func acceptedSize(_ wanted: CGSize) -> CGSize {
-                let before = cocoaFrame(of: window) ?? CGRect(origin: .zero, size: wanted)
-                let widthAxis = abs(wanted.width - before.size.width) > 0.5
-                for _ in 0..<4 {
-                    var origin = Self.quartzOrigin(ofCocoa: CGRect(origin: probeOrigin(wanted), size: wanted))
-                    var s = wanted
-                    if let sv = AXValueCreate(.cgSize, &s) {
-                        AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sv)
-                    }
-                    if let ov = AXValueCreate(.cgPoint, &origin) {
-                        AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, ov)
-                    }
-                    if let sv = AXValueCreate(.cgSize, &s) {
-                        AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sv)
-                    }
-                    if let p = settledFrame(of: window, tries: 6, interval: 0.05) {
-                        if abs(p.size.width - wanted.width) <= 0.5 && abs(p.size.height - wanted.height) <= 0.5 {
-                            return p.size // fully accepted
-                        }
-                        let askedAxisChanged = widthAxis
-                            ? abs(p.size.width - before.size.width) > 0.5
-                            : abs(p.size.height - before.size.height) > 0.5
-                        if askedAxisChanged {
-                            return p.size // clamped on the axis we asked
-                        }
-                    }
-                    Thread.sleep(forTimeInterval: 0.12)
-                }
-                return (settledFrame(of: window) ?? before).size
-            }
-            if target.height < current.height - 0.5 {
-                size = acceptedSize(CGSize(width: current.width, height: target.height))
-            }
-            if target.width < current.width - 0.5 {
-                size = acceptedSize(CGSize(width: target.width, height: size.height))
-            }
-            if abs(size.width - target.width) > 0.5 || abs(size.height - target.height) > 0.5 {
-                Self.log("perform(\(action.rawValue)) probe clamp \(target.size) -> \(size) app=\(appName)")
-                clampedTo = size
-                target = Self.pinnedRect(target: target, actualSize: size, action: resolved)
-            }
-        }
-
         lastCocoaFrame = current
-        Self.log("perform(\(action.rawValue)) resolved=\(resolved.rawValue) app=\(appName) current=\(current) screen='\(screen.localizedName)' visible=\(screen.visibleFrame) mainH=\(Self.mainScreenHeight()) target=\(target)")
-        if let minSize = clampedTo {
-            HUD.show("\(resolved.displayName)\n⚠︎ \(appName) min size \(Int(minSize.width))×\(Int(minSize.height))", in: screen)
-        } else {
-            HUD.show(resolved.displayName, in: screen)
-        }
-        moveAnimated(window, from: current, to: target, generation: generation)
-        // Safety net: if the app still clamped late, re-pin (no-op normally).
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.animationDuration + 0.1) { [weak self] in
+        Self.log("perform(\(action.rawValue)) resolved=\(resolved.rawValue) app=\(appName) current=\(current) screen='\(screen.localizedName)' visible=\(screen.visibleFrame) mainH=\(Self.mainScreenHeight()) target=\(ideal)")
+        HUD.show(resolved.displayName, in: screen)
+        // Animate to the IDEAL target, then (asynchronously - the animation
+        // runs on main-runloop timers, so nothing here may block) measure
+        // what the app actually accepted. Animation writes get through
+        // everywhere; direct AX resize probes do not (Slack drops large
+        // jumps, WhatsApp drops writes that land mid-layout). If the app
+        // clamped (its own minimum size), re-pin to the achievable on-screen
+        // rect and animate again.
+        moveAnimated(window, from: current, to: ideal, generation: generation)
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.animationDuration + 0.35) { [weak self] in
             guard let self, generation == self.moveGeneration else { return }
-            self.settleAndRepin(window, target: target, action: resolved)
-            if let after = self.cocoaFrame(of: window) {
-                Self.log("perform(\(action.rawValue)) finalRead=\(after) delta=\(CGSize(width: after.minX - target.minX, height: after.minY - target.minY))")
+            var target = ideal
+            if let s = self.cocoaFrame(of: window),
+               abs(s.size.width - ideal.width) > 0.5 || abs(s.size.height - ideal.height) > 0.5 {
+                Self.log("perform(\(action.rawValue)) clamp \(ideal.size) -> \(s.size) app=\(appName)")
+                target = Self.pinnedRect(target: ideal, actualSize: s.size, action: resolved)
+                HUD.show("\(resolved.displayName)\n⚠︎ \(appName) min size \(Int(s.size.width))×\(Int(s.size.height))", in: screen)
+                if abs(s.minX - target.minX) > 0.5 || abs(s.minY - target.minY) > 0.5 {
+                    self.moveAnimated(window, from: s, to: target, generation: generation)
+                }
+            }
+            // Safety net: if the app still clamped late, re-pin (no-op normally).
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.animationDuration + 0.1) { [weak self] in
+                guard let self, generation == self.moveGeneration else { return }
+                self.settleAndRepin(window, target: target, action: resolved)
+                if let after = self.cocoaFrame(of: window) {
+                    Self.log("perform(\(action.rawValue)) finalRead=\(after) delta=\(CGSize(width: after.minX - target.minX, height: after.minY - target.minY))")
+                }
             }
         }
+        return resolved
     }
 
     /// Directional resolution shared by hotkeys and the debug bridge.
@@ -345,6 +292,23 @@ final class WindowEngine {
     // MARK: - Front window
 
     /// Focused window of the frontmost application.
+    /// Focused window of a specific app (bridge testing without focus
+    /// games), falling back to the app's first window.
+    static func window(for pid: Int32?) -> AXUIElement? {
+        guard let pid else { return nil }
+        let appEl = AXUIElementCreateApplication(pid)
+        var ref: AnyObject?
+        if AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &ref) == .success, ref != nil {
+            return (ref as! AXUIElement)
+        }
+        var windowsRef: AnyObject?
+        guard
+            AXUIElementCopyAttributeValue(appEl, kAXWindowsAttribute as CFString, &windowsRef) == .success,
+            let windows = windowsRef as? [AXUIElement], !windows.isEmpty
+        else { return nil }
+        return windows[0]
+    }
+
     private func frontWindow() -> AXUIElement? {
         guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
         let appElement = AXUIElementCreateApplication(app.processIdentifier)
@@ -422,6 +386,20 @@ final class WindowEngine {
 
     /// Reads the window frame repeatedly until it stops changing (apps apply
     /// min-size clamps asynchronously), bounded to ~0.3s.
+    /// Waits (synchronously) for the window frame to stop changing after an
+    /// animation - apps apply clamps late. Returns the stable frame.
+    func waitForSettle(_ window: AXUIElement, timeout: Double = 1.5) -> CGRect? {
+        var last = cocoaFrame(of: window)
+        let start = Date()
+        while Date().timeIntervalSince(start) < timeout {
+            Thread.sleep(forTimeInterval: 0.1)
+            let now = cocoaFrame(of: window)
+            if now == last { return now }
+            last = now
+        }
+        return last
+    }
+
     func settledFrame(of window: AXUIElement, tries: Int = 6, interval: Double = 0.05) -> CGRect? {
         var last = cocoaFrame(of: window)
         for _ in 0..<tries {

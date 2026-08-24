@@ -127,11 +127,39 @@ enum RoundTripDebug {
     static func run() {
         let requested = (try? String(contentsOfFile: actionFile, encoding: .utf8))?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let action = WindowAction(rawValue: requested) ?? .topHalf
         let pid = (try? String(contentsOfFile: pidFile, encoding: .utf8))
             .flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
         let seq = (try? String(contentsOfFile: "/tmp/owm-roundtrip.seq", encoding: .utf8))?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? "0"
+
+        // "perform:<action>" drives the REAL hotkey path (probe + animation
+        // + settle) against a PID-targeted window; everything else uses the
+        // legacy single-write round trip.
+        if requested.hasPrefix("perform:") {
+            let raw = String(requested.dropFirst("perform:".count))
+            guard let action = WindowAction(rawValue: raw) else {
+                try? "seq=\(seq) action=\(requested)\nunknown action".write(toFile: reportFile, atomically: true, encoding: .utf8)
+                return
+            }
+            guard let window = WindowEngine.window(for: pid),
+                  let before = WindowEngine.shared.rawQuartzFrame(of: window) else {
+                try? "seq=\(seq) action=\(requested)\nno-front-window".write(toFile: reportFile, atomically: true, encoding: .utf8)
+                return
+            }
+            WindowEngine.shared.perform(action, targetPID: pid)
+            // perform() is fully async (animation timers + deferred settle
+            // all need the main runloop): report later, without blocking.
+            let resolved = WindowEngine.shared.perform(action, targetPID: pid)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                let after = WindowEngine.shared.rawQuartzFrame(of: window) ?? before
+                let appName = NSRunningApplication(processIdentifier: pid ?? -1)?.localizedName ?? "?"
+                try? "seq=\(seq) action=\(requested)\nperform action=\(action.rawValue) resolved=\(resolved?.rawValue ?? action.rawValue) app=\(appName)\nafter quartz=(\(after.origin.x), \(after.origin.y)) size=(\(after.size.width), \(after.size.height))"
+                    .write(toFile: reportFile, atomically: true, encoding: .utf8)
+            }
+            return
+        }
+
+        let action = WindowAction(rawValue: requested) ?? .topHalf
         let report = WindowEngine.shared.debugRoundTrip(action: action, targetPID: pid) ?? "no-front-window"
         try? "seq=\(seq) action=\(requested)\n\(report)".write(toFile: reportFile, atomically: true, encoding: .utf8)
     }

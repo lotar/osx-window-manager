@@ -99,7 +99,7 @@ def pinned(target, size, action):
 
 def trigger(action):
     seq = next(SEQ)
-    open(ACTION_FILE, "w").write(action)
+    open(ACTION_FILE, "w").write("perform:" + action)
     open(SEQ_FILE, "w").write(str(seq))
     open(PID_FILE, "w").write(str(TEST_PID))
     try:
@@ -111,7 +111,7 @@ def trigger(action):
         for _ in range(25):
             time.sleep(0.2)
             if os.path.exists(LOG):
-                if f"seq={seq} action={action}" in open(LOG).read():
+                if f"seq={seq} action=perform:{action}" in open(LOG).read():
                     return parse_report()
     return None
 
