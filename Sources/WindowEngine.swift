@@ -200,19 +200,35 @@ final class WindowEngine {
             // Writes `wanted` and returns the size the app actually accepted.
             // Electron apps (WhatsApp) often DROP a resize write that lands
             // while they are still processing the previous one, so a single
-            // write is not trustworthy - retry until the frame reflects the
-            // write, the app clamps to its own minimum (responded, won't go
-            // further), or attempts run out.
+            // write is not trustworthy: use the Electron-safe
+            // size -> position -> size pattern and retry until the AXIS WE
+            // ASKED TO CHANGE responds (an unrelated-axis change is not a
+            // response - that is exactly the dropped-write signature), the
+            // app clamps on that axis, or attempts run out.
             func acceptedSize(_ wanted: CGSize) -> CGSize {
                 let before = cocoaFrame(of: window) ?? CGRect(origin: .zero, size: wanted)
+                let widthAxis = abs(wanted.width - before.size.width) > 0.5
                 for _ in 0..<4 {
-                    moveImmediate(window, to: CGRect(origin: probeOrigin(wanted), size: wanted))
-                    if let p = settledFrame(of: window, tries: 4, interval: 0.05) {
+                    var origin = Self.quartzOrigin(ofCocoa: CGRect(origin: probeOrigin(wanted), size: wanted))
+                    var s = wanted
+                    if let sv = AXValueCreate(.cgSize, &s) {
+                        AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sv)
+                    }
+                    if let ov = AXValueCreate(.cgPoint, &origin) {
+                        AXUIElementSetAttributeValue(window, kAXPositionAttribute as CFString, ov)
+                    }
+                    if let sv = AXValueCreate(.cgSize, &s) {
+                        AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sv)
+                    }
+                    if let p = settledFrame(of: window, tries: 6, interval: 0.05) {
                         if abs(p.size.width - wanted.width) <= 0.5 && abs(p.size.height - wanted.height) <= 0.5 {
-                            return p.size
+                            return p.size // fully accepted
                         }
-                        if p.size != before.size {
-                            return p.size // responded but clamped to its own minimum
+                        let askedAxisChanged = widthAxis
+                            ? abs(p.size.width - before.size.width) > 0.5
+                            : abs(p.size.height - before.size.height) > 0.5
+                        if askedAxisChanged {
+                            return p.size // clamped on the axis we asked
                         }
                     }
                     Thread.sleep(forTimeInterval: 0.12)
