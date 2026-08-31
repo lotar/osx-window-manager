@@ -27,7 +27,8 @@
   }
   .wrap { max-width: 980px; margin: 0 auto; padding: 64px 24px 96px; }
 
-  header { display: flex; align-items: center; gap: 14px; margin-bottom: 40px; }
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 40px; flex-wrap: wrap; }
+  header .links { margin-left: auto; display: flex; gap: 8px; }
   .icon {
     width: 44px; height: 44px; border-radius: 11px; flex: none;
     background: rgba(90,200,250,0.16); border: 1px solid var(--border);
@@ -93,6 +94,31 @@
   }
   footer { margin-top: 72px; font-size: 13px; color: var(--muted); }
   footer a { color: var(--accent); text-decoration: none; }
+
+  .news {
+    display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap;
+    margin: 22px 0 0; font-size: 14px; color: var(--muted);
+  }
+  .news time { color: var(--accent); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; }
+  .changelog { display: flex; flex-direction: column; gap: 18px; }
+  .changelog article h3 {
+    font-size: 15px; font-weight: 600; color: var(--text);
+    margin-bottom: 10px; letter-spacing: 0;
+    text-transform: none;
+  }
+  .changelog article h3 .sha {
+    font-weight: 400; font-size: 12px; color: var(--muted);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace; margin-left: 8px;
+  }
+  .changelog ul { list-style: disc; padding-left: 1.2em; }
+  .changelog li { padding: 3px 0; }
+  .changelog a, .caption a { color: var(--accent); text-decoration: none; }
+  .changelog .tag {
+    display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: 0.06em;
+    text-transform: uppercase; color: var(--accent);
+    border: 1px solid rgba(90,200,250,0.35); border-radius: 999px;
+    padding: 1px 8px; margin-right: 6px; vertical-align: 1px;
+  }
 </style>
 </head>
 <body>
@@ -101,7 +127,10 @@
   <header>
     <div class="icon">▦</div>
     <h1>osx-window-manager <span class="dim">· Window Manager for macOS</span></h1>
-    <a class="gh" href="https://github.com/lotar/osx-window-manager">GitHub ↗</a>
+    <div class="links">
+      <a class="btn" href="#changelog">Changelog</a>
+      <a class="btn gh" href="https://github.com/lotar/osx-window-manager">GitHub ↗</a>
+    </div>
   </header>
 
   <div class="hero">
@@ -111,6 +140,7 @@
       <video src="demo.mp4" autoplay muted loop playsinline></video>
     </div>
     <p class="caption">Roughly a third of what it can do. Every tile lands pixel-exact; slides clamp at screen edges.</p>
+    <p class="news"><time>2026-08-31</time> Launch-at-login CLI; packaged <code>dist/osx-window-manager.app</code> is in the repo. <a href="#changelog" style="color: var(--accent); text-decoration: none;">Full changelog ↓</a></p>
   </div>
 
   <h2>Shortcuts</h2>
@@ -157,19 +187,80 @@
 
   <h2>Install</h2>
   <div class="card">
+    <p>Clone and open the signed menu-bar app already in the tree (Apple Silicon, macOS 14+):</p>
 <pre>git clone https://github.com/lotar/osx-window-manager
 cd osx-window-manager
-swift build
-./.build/debug/osx-window-manager</pre>
-    <p style="margin-top:12px">Or build the packaged menu-bar app:</p>
-<pre>./scripts/package.sh
 open dist/osx-window-manager.app</pre>
     <p style="margin-top:12px">Grant Accessibility when prompted:
     <strong>System Settings → Privacy &amp; Security → Accessibility</strong>.</p>
+    <p style="margin-top:12px">Start at login from Settings → Launch at Login, or:</p>
+<pre>dist/osx-window-manager.app/Contents/MacOS/osx-window-manager --enable-launch-at-login</pre>
+    <p style="margin-top:12px">Rebuild from source:</p>
+<pre>swift build
+./.build/debug/osx-window-manager
+
+./scripts/package.sh
+open dist/osx-window-manager.app</pre>
+  </div>
+
+  <h2 id="changelog">Changelog</h2>
+  <div class="changelog">
+
+    <article class="card">
+      <h3>31 Aug 2026 <span class="sha">55616fe</span></h3>
+      <ul>
+        <li><span class="tag">Added</span> CLI <code>--enable-launch-at-login</code> / <code>--launch-at-login</code> registers and queries the <code>SMAppService</code> login item without opening Settings.</li>
+        <li><span class="tag">Added</span> Packaged <code>dist/osx-window-manager.app</code> is tracked in git — clone and open, no local Swift build required.</li>
+      </ul>
+    </article>
+
+    <article class="card">
+      <h3>24 Aug 2026 <span class="sha">3e61f73…f85468e</span></h3>
+      <ul>
+        <li><span class="tag">Fixed</span> Stubborn apps (Slack, WhatsApp, anything with a large minimum size): tiling animates to the ideal tile, then corrects. Direct AX resizes are dropped; animation writes land. One press, best size the app allows.</li>
+        <li><span class="tag">Fixed</span> Probe asks each axis separately so a min-height app no longer returns garbage on both axes (width no longer creeps across 10 presses).</li>
+        <li><span class="tag">Fixed</span> Probe retry only counts when the axis that was asked to change actually moved. Grow writes dropped because the app was busy are re-issued.</li>
+        <li><span class="tag">Fixed</span> Shift-arrow from a half/maximize no longer flips top vs bottom from 1 pt rounding — 2 pt dead-zone around screen center.</li>
+        <li><span class="tag">Added</span> <code>scripts/transition_matrix.py</code> — 64 live transitions through the real <code>perform()</code> path.</li>
+      </ul>
+    </article>
+
+    <article class="card">
+      <h3>23 Aug 2026 <span class="sha">8291b92…bccd9c6</span></h3>
+      <ul>
+        <li><span class="tag">Changed</span> Renamed Glass → <strong>osx-window-manager</strong> (bundle id, UserDefaults, logs, Carbon signature).</li>
+        <li><span class="tag">Added</span> This site (GitHub Pages from <code>docs/</code>), MIT license, README install/shortcuts/troubleshooting.</li>
+      </ul>
+    </article>
+
+    <article class="card">
+      <h3>22 Aug 2026 <span class="sha">2afed2b…b0bef4e</span></h3>
+      <ul>
+        <li><span class="tag">Added</span> Settings rebuilt: sectioned cards, keycap shortcut pills, live Accessibility chip, gap stepper, Launch at Login switch.</li>
+        <li><span class="tag">Added</span> HUD toast on every move; names the app and its minimum size when a tile cannot shrink.</li>
+        <li><span class="tag">Changed</span> Quarter tiles are true screen quadrants (½ × ½) — four windows cover the visible frame.</li>
+        <li><span class="tag">Added</span> Geometry matrix tests (<code>matrix_test.py</code>, <code>live_matrix.py</code>). Rapid keypress cancels the in-flight animation.</li>
+        <li><span class="tag">Fixed</span> Clamped full-axis tiles (Slack refusing a short <code>topHalf</code>) no longer park in a corner — halves center on the unconstrained axis.</li>
+      </ul>
+    </article>
+
+    <article class="card">
+      <h3>21 Aug 2026 <span class="sha">444c642…dedaebd</span></h3>
+      <ul>
+        <li><span class="tag">Added</span> First ship: menu-bar tiler, Carbon hotkeys, halves / thirds / two-thirds / maximize / center / restore / displays, Settings, Launch at Login.</li>
+        <li><span class="tag">Fixed</span> Top/bottom tiles inverted (Cocoa Y vs Quartz). Reads and writes share one main-display pivot.</li>
+        <li><span class="tag">Fixed</span> Min-size apps overflowed quarter tiles off-screen — after settle, re-pin to the intended corner.</li>
+        <li><span class="tag">Changed</span> Shift+arrows slide relatively on the 2×2 grid. Re-pressing an occupied half/third cycles. Edge slides are no-ops (no wrap).</li>
+        <li><span class="tag">Added</span> Darwin-notification round-trip bridge so tests can drive the trusted running app.</li>
+      </ul>
+    </article>
+
+    <p class="caption">Commit-level notes: <a href="https://github.com/lotar/osx-window-manager/blob/main/CHANGELOG.md">CHANGELOG.md</a> on GitHub.</p>
   </div>
 
   <footer>
     MIT License · <a href="https://github.com/lotar/osx-window-manager">source on GitHub</a>
+    · <a href="https://github.com/lotar/osx-window-manager/blob/main/CHANGELOG.md">changelog</a>
   </footer>
 
 </div>

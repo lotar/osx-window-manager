@@ -9,7 +9,8 @@
 
 Menu-bar macOS window manager: global shortcuts tile the frontmost window.
 
-**Site & demo:** https://lotar.github.io/osx-window-manager/
+**Site & demo:** https://lotar.github.io/osx-window-manager/  
+**Changelog:** [CHANGELOG.md](CHANGELOG.md) (also on the [site](https://lotar.github.io/osx-window-manager/#changelog))
 
 > **Note:** This project is no longer maintained. It was built as an AI agent test/experiment and is provided as-is.
 
@@ -21,20 +22,30 @@ Menu-bar macOS window manager: global shortcuts tile the frontmost window.
 
 ## Build & Install
 
+The signed menu-bar app is in the tree. After clone (Apple Silicon, macOS 14+):
+
+```bash
+open dist/osx-window-manager.app
+```
+
+Grant Accessibility when prompted (System Settings → Privacy & Security →
+Accessibility). Start at login from the menu-bar **Launch at Login** item, or:
+
+```bash
+dist/osx-window-manager.app/Contents/MacOS/osx-window-manager --enable-launch-at-login
+```
+
+Build from source:
+
 ```bash
 swift build
 ./.build/debug/osx-window-manager
 ```
 
-Release binary:
+Release binary / re-package:
 
 ```bash
 swift build -c release
-```
-
-Packaged app (menu-bar app, Launch at Login support):
-
-```bash
 ./scripts/package.sh
 open dist/osx-window-manager.app
 ```
@@ -70,7 +81,10 @@ UserDefaults domain `osx-window-manager`.
 
 ```bash
 osx-window-manager --dump-layout vx vy vw vh [cx cy cw ch]   # JSON tile geometry (no AX)
-osx-window-manager --trusted                                 # exit 0 if Accessibility granted
+osx-window-manager --dump-resolve cx cy cw ch vx vy vw vh [minW minH]
+osx-window-manager --action <name>                           # tile frontmost window, then exit
+osx-window-manager --roundtrip [action]                      # live AX read/write report
+osx-window-manager --trusted                                 # 1 if Accessibility granted
 osx-window-manager --launch-at-login                         # 1 if SMAppService login item enabled
 osx-window-manager --enable-launch-at-login                  # register login item; prints 1/0
 ```
@@ -87,6 +101,12 @@ Test harnesses: `python3 e2e_test.py` (full suite),
   Tiling animates to the ideal tile first and then corrects, because Electron
   apps (Slack, WhatsApp, …) silently drop direct resize writes but accept
   animated ones — one press always produces the best size the app allows.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for every dated change since the first
+commit (2026-08-21). The same history is on the
+[project site](https://lotar.github.io/osx-window-manager/#changelog).
 
 ## License
 
