@@ -95,6 +95,16 @@ private func runCLI() -> Bool {
         print(WindowEngine.isTrusted() ? "1" : "0")
         return true
     }
+    if args.contains("--enable-launch-at-login") {
+        let ok = LaunchAtLogin.setEnabled(true)
+        print(LaunchAtLogin.isEnabled ? "1" : "0")
+        if !ok || !LaunchAtLogin.isEnabled { exit(1) }
+        return true
+    }
+    if args.contains("--launch-at-login") {
+        print(LaunchAtLogin.isEnabled ? "1" : "0")
+        return true
+    }
     return false
 }
 

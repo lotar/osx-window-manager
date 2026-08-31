@@ -71,6 +71,8 @@ UserDefaults domain `osx-window-manager`.
 ```bash
 osx-window-manager --dump-layout vx vy vw vh [cx cy cw ch]   # JSON tile geometry (no AX)
 osx-window-manager --trusted                                 # exit 0 if Accessibility granted
+osx-window-manager --launch-at-login                         # 1 if SMAppService login item enabled
+osx-window-manager --enable-launch-at-login                  # register login item; prints 1/0
 ```
 
 Test harnesses: `python3 e2e_test.py` (full suite),
